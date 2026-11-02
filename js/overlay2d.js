@@ -2,7 +2,7 @@
 import { HAND_BONES, LANDMARK_FINGER, TIPS, FINGER_NAMES, PALM_TRIS, tipsFor, convexHull, clamp, jointAngle } from './geometry.js';
 
 const MONO = '"Geist Mono", ui-monospace, monospace';
-const FINGER_COLORS = ['#f5b84b', '#5eead4', '#8fb3ff', '#c6f36b', '#ff5d73'];
+const FINGER_COLORS = ['#f5b84b', '#9fc9a6', '#8fb3ff', '#c6f36b', '#ff5d73'];
 
 function hexToRgb(hex) {
   const h = hex.replace('#', '');
@@ -85,12 +85,98 @@ export class Overlay2D {
       if (S.bbox || S.handLabels) this.drawFrame(S, hand, t);
       if (S.particles) this.emit(S, hand, scene.dt);
     }
+    this.drawTactical(S, scene, t);
     if (S.lightning && scene.hands.length >= 2) this.drawLightning(S, scene.hands[0].pts[8], scene.hands[1].pts[8], S.secondary, 3);
     if (!S.tracers && this.trails.size) this.trails.clear();
     this.prune(scene);
     this.drawParticles(S, scene.dt);
     this.drawRipples(t);
     ctx.globalAlpha = 1;
+  }
+
+  // ---------------------------------------------------------------- tactical
+  handCenter(hand) {
+    const P = hand.pts, ids = [0, 5, 9, 13, 17];
+    return { x: ids.reduce((s, i) => s + P[i].x, 0) / 5, y: ids.reduce((s, i) => s + P[i].y, 0) / 5 };
+  }
+  rangeCm(hand) {
+    const P = hand.pts; const palmPx = Math.hypot(P[9].x - P[0].x, P[9].y - P[0].y) || 1;
+    const f = Math.max(this.w, this.h) * 0.87; // ~60 deg horizontal FOV
+    return clamp((9.6 * f) / palmPx, 5, 400);
+  }
+  drawTactical(S, scene, t) {
+    const { ctx, w, h } = this; const col = S.tacColor || S.accent; const cx = w / 2, cy = h / 2;
+    this.locks = this.locks || new Map();
+    const live = new Set(scene.hands.map((k) => k.id));
+    for (const k of this.locks.keys()) if (!live.has(k)) this.locks.delete(k);
+    ctx.save(); ctx.font = `600 10px ${MONO}`; ctx.textBaseline = 'middle';
+    if (S.boresight) {
+      ctx.strokeStyle = rgba(col, 0.75); ctx.fillStyle = rgba(col, 0.75); ctx.lineWidth = 1;
+      const g = 16, L = 70; ctx.beginPath();
+      ctx.moveTo(cx - L, cy); ctx.lineTo(cx - g, cy); ctx.moveTo(cx + g, cy); ctx.lineTo(cx + L, cy);
+      ctx.moveTo(cx, cy + g); ctx.lineTo(cx, cy + L); ctx.moveTo(cx, cy - g); ctx.lineTo(cx, cy - L * 0.5); ctx.stroke();
+      for (let k = 1; k <= 4; k++) { const d = g + k * ((L - g) / 4); for (const [dx, dy] of [[d, 0], [-d, 0], [0, d]]) { ctx.beginPath(); ctx.arc(cx + dx, cy + dy, 1.4, 0, 7); ctx.fill(); } }
+      ctx.beginPath(); ctx.arc(cx, cy, 1.2, 0, 7); ctx.fill();
+    }
+    if (S.headingTape) {
+      const prim = scene.hands[0]; const hdg = prim ? ((this.handCenter(prim).x / w) - 0.5) * 60 : 0;
+      this.hdg = this.hdg == null ? hdg : this.hdg + (hdg - this.hdg) * 0.2;
+      const brg = (this.hdg + 360) % 360; const y = 92, half = Math.min(220, w * 0.3), ppd = half / 30;
+      ctx.strokeStyle = rgba(col, 0.7); ctx.fillStyle = rgba(col, 0.85); ctx.lineWidth = 1; ctx.textAlign = 'center';
+      ctx.beginPath(); ctx.moveTo(cx - half, y + 10); ctx.lineTo(cx + half, y + 10); ctx.stroke();
+      const start = Math.floor(brg - 30);
+      for (let d = start; d <= brg + 30; d++) {
+        if (d % 5) continue; const x = cx + (d - brg) * ppd; const big = d % 10 === 0;
+        ctx.beginPath(); ctx.moveTo(x, y + 10); ctx.lineTo(x, y + (big ? 2 : 6)); ctx.stroke();
+        if (d % 10 === 0) { const v = ((d % 360) + 360) % 360; const lab = { 0: 'N', 90: 'E', 180: 'S', 270: 'W' }[v] ?? String(v).padStart(3, '0'); ctx.fillText(lab, x, y - 6); }
+      }
+      ctx.beginPath(); ctx.moveTo(cx, y + 13); ctx.lineTo(cx - 5, y + 20); ctx.lineTo(cx + 5, y + 20); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = 'rgba(5,7,8,.85)'; ctx.fillRect(cx - 22, y + 22, 44, 15); ctx.strokeRect(cx - 22, y + 22, 44, 15);
+      ctx.fillStyle = col; ctx.fillText(String(Math.round(brg) % 360).padStart(3, '0'), cx, y + 30);
+    }
+    scene.hands.forEach((hand, idx) => {
+      const c = this.handCenter(hand); const rng = this.rangeCm(hand);
+      if (S.targetLock) {
+        let L = this.locks.get(hand.id); if (!L) { L = { t0: t }; this.locks.set(hand.id, L); }
+        const k = clamp((t - L.t0) / 900, 0, 1); const locked = k >= 1;
+        const r = (60 - 28 * k) * hand.scale + 22; const lc = locked ? '#e0624f' : col;
+        ctx.strokeStyle = lc; ctx.lineWidth = 1.4;
+        ctx.save(); ctx.translate(c.x, c.y); ctx.rotate(Math.PI / 4 * (1 - k) + (locked ? 0 : t * 0.002));
+        ctx.beginPath(); ctx.moveTo(0, -r); ctx.lineTo(r, 0); ctx.lineTo(0, r); ctx.lineTo(-r, 0); ctx.closePath();
+        ctx.setLineDash(locked ? [] : [6, 5]); ctx.stroke(); ctx.setLineDash([]); ctx.restore();
+        ctx.beginPath(); for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { ctx.moveTo(c.x + dx * (r + 4), c.y + dy * (r + 4)); ctx.lineTo(c.x + dx * (r + 12), c.y + dy * (r + 12)); } ctx.stroke();
+        ctx.strokeStyle = rgba(lc, 0.35); ctx.setLineDash([3, 6]); ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(c.x, c.y); ctx.stroke(); ctx.setLineDash([]);
+        const az = ((c.x - cx) / w) * 60, el = -((c.y - cy) / h) * 45;
+        const lines = [[`TGT-${String(hand.id).padStart(2, '0')}  ${locked ? 'LOCKED' : 'ACQ ' + Math.round(k * 100) + '%'}`, lc], [`AZ ${az >= 0 ? '+' : ''}${az.toFixed(1)}  EL ${el >= 0 ? '+' : ''}${el.toFixed(1)}`, col]];
+        if (S.rangeFinder) lines.push([`RNG ${rng.toFixed(0)} CM`, col]);
+        let y0 = Infinity; for (const p of hand.pts) y0 = Math.min(y0, p.y);
+        const bw = Math.max(...lines.map(([s]) => ctx.measureText(s).width)) + 14, bh = lines.length * 13 + 6;
+        let tx = c.x - bw / 2, ty = y0 - 14 * hand.scale - 34 - bh; if (ty < 130) { let y1 = -Infinity; for (const p of hand.pts) y1 = Math.max(y1, p.y); ty = y1 + 20; }
+        tx = clamp(tx, 8, w - bw - 8);
+        ctx.fillStyle = 'rgba(5,7,8,.78)'; ctx.fillRect(tx, ty, bw, bh); ctx.fillStyle = lc; ctx.fillRect(tx, ty, 2, bh);
+        ctx.textAlign = 'left'; lines.forEach(([s2, cc], j) => { ctx.fillStyle = cc; ctx.fillText(s2, tx + 8, ty + 10 + j * 13); });
+      } else if (S.rangeFinder) {
+        ctx.textAlign = 'center'; ctx.fillStyle = col; ctx.fillText(`RNG ${rng.toFixed(0)} CM`, c.x, c.y + 70 * hand.scale);
+      }
+    });
+    if (S.radar) {
+      const R = Math.min(64, w * 0.12), rx = w - R - 28, ry = h - R - 160;
+      ctx.fillStyle = 'rgba(5,7,8,.6)'; ctx.beginPath(); ctx.arc(rx, ry, R, 0, 7); ctx.fill();
+      ctx.strokeStyle = rgba(col, 0.5); ctx.lineWidth = 1;
+      for (const f of [1, 0.66, 0.33]) { ctx.beginPath(); ctx.arc(rx, ry, R * f, 0, 7); ctx.stroke(); }
+      ctx.beginPath(); ctx.moveTo(rx - R, ry); ctx.lineTo(rx + R, ry); ctx.moveTo(rx, ry - R); ctx.lineTo(rx, ry + R); ctx.stroke();
+      const a = (t * 0.0022) % (Math.PI * 2);
+      const gr = ctx.createConicGradient ? ctx.createConicGradient(a - 0.9, rx, ry) : null;
+      if (gr) { gr.addColorStop(0, 'rgba(0,0,0,0)'); gr.addColorStop(0.14, rgba(col, 0.28)); gr.addColorStop(0.1433, 'rgba(0,0,0,0)'); gr.addColorStop(1, 'rgba(0,0,0,0)'); ctx.fillStyle = gr; ctx.beginPath(); ctx.arc(rx, ry, R, 0, 7); ctx.fill(); }
+      for (const hand of scene.hands) {
+        const c = this.handCenter(hand); const rng = this.rangeCm(hand);
+        const bx = rx + ((c.x / w) - 0.5) * 2 * R * 0.85, by = ry + R - clamp(rng / 150, 0, 1) * 2 * R * 0.9;
+        ctx.fillStyle = hand.slot % 2 ? S.secondary : col; ctx.beginPath(); ctx.arc(bx, by, 3, 0, 7); ctx.fill();
+      }
+      ctx.fillStyle = rgba(col, 0.8); ctx.textAlign = 'center';
+      ctx.fillText(`CONTACTS ${String(scene.hands.length).padStart(2, '0')}`, rx, ry + R + 12);
+    }
+    ctx.restore();
   }
 
   prune(scene) {

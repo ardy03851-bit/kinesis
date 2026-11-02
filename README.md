@@ -10,8 +10,9 @@ Live: https://ardy03851-bit.github.io/kinesis/
 - 2D skeleton styles: solid, neon, dashed, double, tapered, pulse; joint shapes, colour modes (accent, rainbow, depth, velocity, per-finger)
 - Effects: tracers (ribbon, comet, dots), tip crosshairs, bounding frames, palm HUD, velocity vectors, lightning arcs, two-hand string web, particles, ripples, convex hull, air painting
 - 3D hand rig (three.js) in 10 materials: mannequin, hologram, robot, x-ray, glass, wireframe, neon, ghost, chrome, gold, with optional 3D forearm
+- Tactical layer: boresight reticle, bearing tape, rangefinder, target designator with lock-on and AZ/EL readout, contact radar
 - Scene: video filters (thermal, noir, invert, cyan, mono), dim, grid, scanlines, vignette, frame HUD
-- 8 presets, searchable settings panel, export / import / share-link of settings
+- 9 presets (including Recon), searchable settings panel, export / import / share-link of settings
 - Photo capture and video recording, fullscreen, wake lock, offline cache, installable PWA
 
 ## Using on iPad

@@ -337,7 +337,7 @@ function drawSpark() {
     c.strokeStyle = color; c.lineWidth = 1.4; c.stroke();
     if (fill) { c.lineTo(((H.length - 1) / 59) * w, h); c.lineTo(0, h); c.closePath(); c.fillStyle = fill; c.fill(); }
   };
-  const acc = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#5eead4';
+  const acc = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#9fc9a6';
   line('f', acc, acc + '22');
   line('i', '#f5b84b');
 }

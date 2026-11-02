@@ -2,10 +2,10 @@
 // Every control in the settings panel is generated from SCHEMA.
 
 export const VERSION = '1.0.0';
-export const STORAGE_KEY = 'kinesis.settings.v1';
+export const STORAGE_KEY = 'kinesis.settings.v2';
 
 const palette = [
-  { value: '#5eead4', label: 'Signal' },
+  { value: '#9fc9a6', label: 'Signal' },
   { value: '#f5b84b', label: 'Amber' },
   { value: '#ff5d73', label: 'Alert' },
   { value: '#8fb3ff', label: 'Ice' },
@@ -67,7 +67,7 @@ export const SCHEMA = [
         controls: [
           { key: 'showBones', type: 'toggle', label: 'Draw bones' },
           { key: 'boneStyle', type: 'select', label: 'Bone style', showIf: 'showBones',
-            options: [ { value: 'solid', label: 'Solid' }, { value: 'neon', label: 'Neon glow' }, { value: 'dashed', label: 'Tactical dashed' }, { value: 'double', label: 'Twin rail' }, { value: 'tapered', label: 'Tapered' }, { value: 'pulse', label: 'Data pulse' } ] },
+            options: [ { value: 'solid', label: 'Solid' }, { value: 'neon', label: 'Glow' }, { value: 'dashed', label: 'Tactical dashed' }, { value: 'double', label: 'Twin rail' }, { value: 'tapered', label: 'Tapered' }, { value: 'pulse', label: 'Pulse' } ] },
           { key: 'boneWidth', type: 'range', label: 'Thickness', min: 0.5, max: 12, step: 0.5, fmt: 'px', showIf: 'showBones' },
           { key: 'depthWidth', type: 'toggle', label: 'Depth-scaled thickness', showIf: 'showBones', desc: 'Closer joints render thicker.' },
           { key: 'palmMesh', type: 'toggle', label: 'Palm lattice' },
@@ -243,6 +243,17 @@ export const SCHEMA = [
         ],
       },
       {
+        id: 'tactical', label: 'Tactical',
+        controls: [
+          { key: 'boresight', type: 'toggle', label: 'Boresight reticle', desc: 'Fixed mil-dot reticle at screen centre.' },
+          { key: 'headingTape', type: 'toggle', label: 'Bearing tape', desc: 'Compass tape tracking the primary contact.' },
+          { key: 'rangeFinder', type: 'toggle', label: 'Rangefinder', desc: 'Estimated camera distance per hand.' },
+          { key: 'targetLock', type: 'toggle', label: 'Target designator', desc: 'Acquire, lock and lead line to each hand.' },
+          { key: 'radar', type: 'toggle', label: 'Contact radar', desc: 'Plan view of tracked contacts.' },
+          { key: 'tacColor', type: 'color', label: 'Tactical colour', swatches: palette },
+        ],
+      },
+      {
         id: 'iface', label: 'Interface',
         controls: [
           { key: 'uiAccent', type: 'color', label: 'Interface accent', swatches: palette },
@@ -268,7 +279,7 @@ export const DEFAULTS = {
 
   showBones: true, boneStyle: 'neon', boneWidth: 3, depthWidth: true, palmMesh: true,
   showJoints: true, jointShape: 'ring', jointSize: 4.5, tipHighlight: true, showIndices: false, showAngles: false,
-  colorMode: 'accent', accent: '#5eead4', secondary: '#f5b84b', opacity: 1,
+  colorMode: 'accent', accent: '#9fc9a6', secondary: '#d4a24c', opacity: 1,
 
   tracers: true, tracerStyle: 'ribbon', tracerLength: 28, tracerWidth: 4, tracerTips: 'index',
   crosshairs: true, crosshairStyle: 'tactical', crosshairTips: 'index', crosshairSize: 26, coords: true,
@@ -277,7 +288,7 @@ export const DEFAULTS = {
   airPaint: false, paintFade: 0,
 
   hand3d: false, hand3dStyle: 'mannequin', hand3dOpacity: 0.92, hand3dThickness: 1, hand3dDepth: 1,
-  hand3dGlow: false, hand3dTint: '#5eead4', lightOrbit: true, lightIntensity: 1.2, hand3dShadow: true,
+  hand3dGlow: false, hand3dTint: '#9fc9a6', lightOrbit: true, lightIntensity: 1.2, hand3dShadow: true,
 
   armTracking: true, poseModel: 'lite', poseEvery: 1, armStyle: 'bone', armWidth: 8, elbowAngle: true, shoulders: false, arm3d: true, forearmEstimate: true,
 
@@ -285,49 +296,55 @@ export const DEFAULTS = {
   grid: false, scanlines: false, vignette: true, frameHud: true, scanSweep: false,
 
   telemetry: true, fpsGraph: true, handLabels: true, gestures: true, gestureToast: true, swapHands: false,
-  uiAccent: '#5eead4', reduceMotion: false, keepAwake: true,
+  boresight: true, headingTape: true, rangeFinder: true, targetLock: true, radar: true, tacColor: '#9fc9a6',
+  uiAccent: '#9fc9a6', reduceMotion: false, keepAwake: true,
 };
 
 // Presets only override visual keys; tracking settings are preserved.
 export const PRESETS = [
   {
     id: 'tactical', name: 'Tactical', icon: 'crosshair', desc: 'Clean surgical overlay with reticles and telemetry.',
-    swatch: ['#5eead4', '#0b0f10'],
-    values: { boneStyle: 'neon', colorMode: 'accent', accent: '#5eead4', jointShape: 'ring', tracers: true, tracerStyle: 'ribbon', crosshairs: true, crosshairStyle: 'tactical', bbox: true, palmHud: false, lightning: false, particles: false, hull: false, hand3d: false, videoFilter: 'none', videoDim: 0.85, grid: false, scanlines: false, frameHud: true, scanSweep: false, stringWeb: false },
+    swatch: ['#4f6b55', '#0b0f10'],
+    values: { boneStyle: 'neon', colorMode: 'accent', accent: '#9fc9a6', jointShape: 'ring', tracers: true, tracerStyle: 'ribbon', crosshairs: true, crosshairStyle: 'tactical', bbox: true, palmHud: false, lightning: false, particles: false, hull: false, hand3d: false, videoFilter: 'none', videoDim: 0.85, grid: false, scanlines: false, frameHud: true, scanSweep: false, stringWeb: false },
   },
   {
     id: 'hologram', name: 'Hologram', icon: 'scan', desc: 'Volumetric hologram hand over a cold, dim feed.',
-    swatch: ['#8fb3ff', '#05070d'],
+    swatch: ['#4a5d7a', '#05070d'],
     values: { boneStyle: 'pulse', colorMode: 'accent', accent: '#8fb3ff', jointShape: 'circle', tracers: true, tracerStyle: 'comet', crosshairs: false, bbox: false, palmHud: true, hand3d: true, hand3dStyle: 'hologram', hand3dTint: '#8fb3ff', hand3dGlow: true, videoFilter: 'cyan', videoDim: 0.55, scanlines: true, grid: true, scanSweep: false, lightning: false, particles: false, hull: false },
   },
   {
-    id: 'cyber', name: 'Cyber', icon: 'zap', desc: 'Electric arcs, sparks and a neon spectrum skeleton.',
-    swatch: ['#ff5d73', '#f5b84b'],
-    values: { boneStyle: 'neon', colorMode: 'rainbow', jointShape: 'diamond', tracers: true, tracerStyle: 'ribbon', tracerTips: 'all', crosshairs: true, crosshairStyle: 'lock', lightning: true, particles: true, stringWeb: true, hand3d: false, videoFilter: 'noir', videoDim: 0.5, scanlines: true, frameHud: true, bbox: true, hull: false },
+    id: 'cyber', name: 'Engage', icon: 'zap', desc: 'Arc discharge between contacts with lock-on targeting.',
+    swatch: ['#8a3b33', '#14100f'],
+    values: { boneStyle: 'neon', colorMode: 'accent', accent: '#c9d4dc', jointShape: 'diamond', tracers: true, tracerStyle: 'ribbon', tracerTips: 'all', crosshairs: true, crosshairStyle: 'lock', lightning: true, particles: true, stringWeb: true, hand3d: false, videoFilter: 'noir', videoDim: 0.5, scanlines: true, frameHud: true, bbox: true, hull: false },
   },
   {
     id: 'xray', name: 'X-Ray', icon: 'bone', desc: 'Radiograph look with anatomical bones in 3D.',
-    swatch: ['#dfe9ff', '#0a0d14'],
+    swatch: ['#5b6370', '#0a0d14'],
     values: { boneStyle: 'tapered', colorMode: 'accent', accent: '#dfe9ff', jointShape: 'circle', tracers: false, crosshairs: false, bbox: false, hand3d: true, hand3dStyle: 'xray', hand3dTint: '#9cc2ff', hand3dGlow: true, videoFilter: 'invert', videoDim: 0.35, scanlines: false, grid: false, armStyle: 'bone', lightning: false, particles: false, hull: true },
   },
   {
     id: 'thermal', name: 'Thermal', icon: 'flame', desc: 'Infrared feed with depth heatmap skeleton.',
-    swatch: ['#f5b84b', '#ff5d73'],
+    swatch: ['#7a5a2a', '#120e0a'],
     values: { boneStyle: 'solid', colorMode: 'depth', jointShape: 'square', tracers: true, tracerStyle: 'dots', crosshairs: true, crosshairStyle: 'circle', bbox: true, hand3d: false, videoFilter: 'thermal', videoDim: 0.9, scanlines: false, grid: true, lightning: false, particles: false, hull: false },
   },
   {
     id: 'chrome', name: 'Chrome', icon: 'gem', desc: 'Liquid-metal 3D hand with orbiting studio light.',
-    swatch: ['#e8edf2', '#7c8a96'],
+    swatch: ['#6a737b', '#1a1d20'],
     values: { boneStyle: 'solid', boneWidth: 2, colorMode: 'accent', accent: '#f0f0f0', jointShape: 'circle', tracers: false, crosshairs: false, bbox: false, hand3d: true, hand3dStyle: 'chrome', hand3dOpacity: 1, hand3dGlow: false, lightOrbit: true, videoFilter: 'none', videoDim: 0.8, scanlines: false, grid: false, lightning: false, particles: false, hull: false, palmMesh: false },
   },
   {
     id: 'mech', name: 'Mech', icon: 'bot', desc: 'Robotic exoskeleton rig with amber servos.',
-    swatch: ['#f5b84b', '#1c1f22'],
+    swatch: ['#6b5a3a', '#1c1f22'],
     values: { boneStyle: 'double', colorMode: 'accent', accent: '#f5b84b', jointShape: 'square', tracers: false, crosshairs: true, crosshairStyle: 'bracket', bbox: true, hand3d: true, hand3dStyle: 'robot', hand3dTint: '#f5b84b', hand3dOpacity: 1, videoFilter: 'mono', videoDim: 0.7, grid: true, scanlines: false, lightning: false, particles: false, hull: false },
+  },
+  {
+    id: 'recon', name: 'Recon', icon: 'radar', desc: 'Night-vision feed, designators, rangefinder and radar.',
+    swatch: ['#3e5a36', '#070a06'],
+    values: { boneStyle: 'dashed', colorMode: 'accent', accent: '#b6f0a8', jointShape: 'square', tracers: false, crosshairs: true, crosshairStyle: 'bracket', bbox: false, palmHud: false, lightning: false, particles: false, hull: false, hand3d: false, videoFilter: 'night', videoDim: 0.75, scanlines: true, grid: false, frameHud: true, boresight: true, headingTape: true, rangeFinder: true, targetLock: true, radar: true, tacColor: '#b6f0a8' },
   },
   {
     id: 'minimal', name: 'Minimal', icon: 'circle-dot', desc: 'Just the skeleton. Nothing else.',
     swatch: ['#f0f0f0', '#2a2d30'],
-    values: { boneStyle: 'solid', boneWidth: 2, colorMode: 'accent', accent: '#f0f0f0', jointShape: 'circle', jointSize: 3, tracers: false, crosshairs: false, bbox: false, palmHud: false, velocity: false, pinchLine: false, lightning: false, particles: false, hull: false, hand3d: false, videoFilter: 'none', videoDim: 1, grid: false, scanlines: false, vignette: false, frameHud: false, scanSweep: false, stringWeb: false, palmMesh: false },
+    values: { boneStyle: 'solid', boneWidth: 2, colorMode: 'accent', accent: '#f0f0f0', jointShape: 'circle', jointSize: 3, tracers: false, crosshairs: false, bbox: false, palmHud: false, velocity: false, pinchLine: false, lightning: false, particles: false, hull: false, hand3d: false, videoFilter: 'none', videoDim: 1, grid: false, scanlines: false, vignette: false, frameHud: false, scanSweep: false, stringWeb: false, palmMesh: false, boresight: false, headingTape: false, rangeFinder: false, targetLock: false, radar: false },
   },
 ];

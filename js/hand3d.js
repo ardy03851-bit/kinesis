@@ -215,7 +215,7 @@ export class Hand3D {
     this.style = null; this.tint = null;
     this.rigs = [];
     this.w = 1; this.h = 1;
-    this.setStyle('mannequin', '#5eead4');
+    this.setStyle('mannequin', '#9fc9a6');
   }
 
   resize(w, h, dpr) {
