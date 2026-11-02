@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<title>Kinesis — Real-time Hand &amp; Arm Skeletal Tracking</title>
+<meta name="description" content="Kinesis tracks your hands and arms through the camera and draws a live skeleton, 3D hand rig and HUD effects — entirely on-device in the browser.">
+<meta name="theme-color" content="#050607">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Kinesis">
+<link rel="icon" href="assets/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="assets/icon-180.png">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+<link rel="preconnect" href="https://storage.googleapis.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/app.css">
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/"
+} }
+</script>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <filter id="thermal" color-interpolation-filters="sRGB">
+    <feColorMatrix type="matrix" values="0.3 0.59 0.11 0 0  0.3 0.59 0.11 0 0  0.3 0.59 0.11 0 0  0 0 0 1 0"/>
+    <feComponentTransfer>
+      <feFuncR type="table" tableValues="0.02 0.25 0.75 1 1 1"/>
+      <feFuncG type="table" tableValues="0.02 0.02 0.1 0.45 0.85 1"/>
+      <feFuncB type="table" tableValues="0.2 0.55 0.45 0.05 0.1 0.85"/>
+    </feComponentTransfer>
+  </filter>
+</svg>
+
+<main id="stage" aria-label="Camera view">
+  <video id="video" playsinline muted autoplay></video>
+  <div class="fx fx-grid-l" aria-hidden="true"></div>
+  <canvas id="gl" class="hidden"></canvas>
+  <canvas id="overlay"></canvas>
+  <div class="fx fx-scan-l" aria-hidden="true"></div>
+  <div class="fx fx-sweep-l" aria-hidden="true"></div>
+  <div class="fx fx-vignette-l" aria-hidden="true"></div>
+  <div class="fx fx-frame-l" aria-hidden="true">
+    <i class="c tl"></i><i class="c tr"></i><i class="c bl"></i><i class="c br"></i>
+    <span class="fl fl-tl">REC.709 · LIVE</span><span class="fl fl-br" id="frame-clock">00:00:00:00</span>
+    <span class="center-mark"></span>
+  </div>
+</main>
+
+<header class="topbar chrome">
+  <div class="brand">
+    <svg class="logo" viewBox="0 0 32 32" aria-label="Kinesis"><path d="M9 26V6M9 16l10-10M13 13l9 13" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/><circle cx="9" cy="6" r="2.4" fill="currentColor"/><circle cx="19" cy="6" r="2.4" fill="currentColor"/><circle cx="22" cy="26" r="2.4" fill="currentColor"/><circle cx="9" cy="26" r="2.4" fill="currentColor"/></svg>
+    <span class="wordmark">KINESIS</span>
+  </div>
+  <div class="status" id="status" data-state="idle"><i></i><span>Standby</span></div>
+  <div class="chip mono" id="chip-fps">— FPS</div>
+  <div class="rec-pill" id="rec-pill"><i></i><span id="rec-time">00:00</span></div>
+</header>
+
+<nav class="dock chrome" aria-label="Controls">
+  <div class="dock-group">
+    <button class="dbtn" id="btn-pause" title="Pause (Space)" aria-label="Pause" data-icon="pause"></button>
+    <button class="dbtn" id="btn-3d" title="3D hand (3)" aria-label="Toggle 3D hand" data-icon="box"></button>
+    <button class="dbtn" id="btn-paint" title="Air paint" aria-label="Toggle air paint" data-icon="brush"></button>
+    <button class="dbtn" id="btn-flip" title="Switch camera" aria-label="Switch camera" data-icon="switch-camera"></button>
+  </div>
+  <button class="shutter" id="btn-shot" title="Capture still (P)" aria-label="Capture still"><span></span></button>
+  <div class="dock-group">
+    <button class="dbtn" id="btn-rec" title="Record (R)" aria-label="Record video" data-icon="circle-dot"></button>
+    <button class="dbtn" id="btn-hide" title="Hide interface (H)" aria-label="Hide interface" data-icon="eye-off"></button>
+    <button class="dbtn" id="btn-full" title="Fullscreen (F)" aria-label="Fullscreen" data-icon="maximize"></button>
+    <button class="dbtn accent" id="btn-settings" title="Settings (S)" aria-label="Settings" aria-expanded="false" data-icon="sliders-horizontal"></button>
+  </div>
+</nav>
+
+<aside class="telemetry chrome" id="telemetry" aria-label="Telemetry">
+  <div class="tl-head"><span data-icon="activity"></span>Telemetry</div>
+  <dl>
+    <div><dt>Render</dt><dd><b id="t-fps">0</b><small>fps</small></dd></div>
+    <div><dt>Inference</dt><dd><b id="t-hz">0</b><small>Hz</small></dd></div>
+    <div><dt>Latency</dt><dd><b id="t-ms">0</b><small>ms</small></dd></div>
+    <div><dt>Hands</dt><dd><b id="t-hands">0</b></dd></div>
+  </dl>
+  <canvas id="spark" aria-hidden="true"></canvas>
+  <ul class="tl-rows">
+    <li><span>Gesture</span><b id="t-gesture">—</b></li>
+    <li><span>Pinch</span><b id="t-pinch">—</b></li>
+    <li><span>Arm</span><b id="t-arm">—</b></li>
+    <li><span>Source</span><b id="t-res">—</b></li>
+  </ul>
+</aside>
+
+<div class="gesture" id="gesture" aria-live="polite"></div>
+<div class="toasts" id="toasts" aria-live="polite"></div>
+<div class="flash" id="flash"></div>
+<button class="show-ui" id="btn-show" aria-label="Show interface" data-icon="eye"></button>
+
+<aside class="panel" id="panel" aria-label="Settings">
+  <div class="panel-top">
+    <div class="panel-title"><span data-icon="settings-2"></span><b>Configuration</b></div>
+    <button class="ibtn" id="panel-close" aria-label="Close settings" data-icon="x"></button>
+  </div>
+  <label class="search"><span data-icon="search"></span><input id="settings-search" type="search" placeholder="Search settings" autocomplete="off" spellcheck="false"></label>
+  <div class="panel-main">
+    <nav class="rail" role="tablist"></nav>
+    <div class="panel-body"></div>
+  </div>
+</aside>
+
+<section class="intro" id="intro">
+  <div class="intro-bg" aria-hidden="true"></div>
+  <div class="intro-card">
+    <div class="intro-art"><svg class="hero-hand" viewBox="0 0 200 250" aria-hidden="true"><g class="hh-bones"><line x1="100" y1="222" x2="72" y2="204" style="--i:0"/><line x1="72" y1="204" x2="50" y2="180" style="--i:1"/><line x1="50" y1="180" x2="36" y2="155" style="--i:2"/><line x1="36" y1="155" x2="26" y2="132" style="--i:3"/><line x1="100" y1="222" x2="76" y2="138" style="--i:4"/><line x1="76" y1="138" x2="71" y2="102" style="--i:5"/><line x1="71" y1="102" x2="68" y2="79" style="--i:6"/><line x1="68" y1="79" x2="66" y2="58" style="--i:7"/><line x1="76" y1="138" x2="100" y2="132" style="--i:8"/><line x1="100" y1="132" x2="100" y2="93" style="--i:9"/><line x1="100" y1="93" x2="100" y2="68" style="--i:10"/><line x1="100" y1="68" x2="100" y2="45" style="--i:11"/><line x1="100" y1="132" x2="123" y2="137" style="--i:12"/><line x1="123" y1="137" x2="127" y2="101" style="--i:13"/><line x1="127" y1="101" x2="129" y2="79" style="--i:14"/><line x1="129" y1="79" x2="131" y2="60" style="--i:15"/><line x1="123" y1="137" x2="144" y2="147" style="--i:16"/><line x1="100" y1="222" x2="144" y2="147" style="--i:17"/><line x1="144" y1="147" x2="153" y2="120" style="--i:18"/><line x1="153" y1="120" x2="158" y2="102" style="--i:19"/><line x1="158" y1="102" x2="162" y2="85" style="--i:20"/></g><g class="hh-joints"><circle cx="100" cy="222" r="3" style="--i:0"/><circle cx="72" cy="204" r="3" style="--i:1"/><circle cx="50" cy="180" r="3" style="--i:2"/><circle cx="36" cy="155" r="3" style="--i:3"/><circle cx="26" cy="132" r="4.2" style="--i:4"/><circle cx="76" cy="138" r="3" style="--i:5"/><circle cx="71" cy="102" r="3" style="--i:6"/><circle cx="68" cy="79" r="3" style="--i:7"/><circle cx="66" cy="58" r="4.2" style="--i:8"/><circle cx="100" cy="132" r="3" style="--i:9"/><circle cx="100" cy="93" r="3" style="--i:10"/><circle cx="100" cy="68" r="3" style="--i:11"/><circle cx="100" cy="45" r="4.2" style="--i:12"/><circle cx="123" cy="137" r="3" style="--i:13"/><circle cx="127" cy="101" r="3" style="--i:14"/><circle cx="129" cy="79" r="3" style="--i:15"/><circle cx="131" cy="60" r="4.2" style="--i:16"/><circle cx="144" cy="147" r="3" style="--i:17"/><circle cx="153" cy="120" r="3" style="--i:18"/><circle cx="158" cy="102" r="3" style="--i:19"/><circle cx="162" cy="85" r="4.2" style="--i:20"/></g><g class="hh-tip"><circle cx="66" cy="58" r="14"/><path d="M66 36v10M66 70v10M44 58h10M78 58h10"/></g></svg>
+      <div class="art-ring" aria-hidden="true"></div>
+    </div>
+    <div class="intro-copy">
+      <p class="eyebrow mono"><span class="dot"></span>On-device neural tracking</p>
+      <h1>Kinesis</h1>
+      <p class="lede">A live skeletal overlay for your hand and arm. 21 landmarks per hand, pose-tracked forearm, a lit 3D rig and a full instrument panel of effects — all running locally in your browser.</p>
+      <div class="facing segment-lite" role="group" aria-label="Camera">
+        <button data-facing="user" class="on"><span data-icon="smartphone"></span>Front camera</button>
+        <button data-facing="environment"><span data-icon="camera"></span>Rear camera</button>
+      </div>
+      <div class="intro-actions">
+        <button class="btn primary" id="btn-start"><span data-icon="scan-line"></span><span>Start tracking</span></button>
+        <button class="btn ghost" id="btn-file"><span data-icon="upload"></span><span>Open video file</span></button>
+      </div>
+      <div class="intro-error" id="intro-error" role="alert"></div>
+      <div class="boot">
+        <div class="boot-bar" id="boot-bar"><i></i></div>
+        <ol class="boot-log mono" id="boot-log"></ol>
+      </div>
+      <ul class="specs mono">
+        <li><span data-icon="fingerprint"></span>21-point hand mesh</li>
+        <li><span data-icon="bone"></span>Arm pose</li>
+        <li><span data-icon="box"></span>10 3D models</li>
+        <li><span data-icon="shield"></span>Video stays on device</li>
+      </ul>
+    </div>
+  </div>
+  <input type="file" id="file-input" accept="video/*" hidden>
+</section>
+<button hidden id="btn-source"></button>
+
+<script type="module" src="js/main.js"></script>
+</body>
+</html>
