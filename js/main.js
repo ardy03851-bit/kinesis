@@ -230,7 +230,7 @@ function ingestFaces(faces, now) {
       }
       return { x: p.x, y: p.y, z: p.z };
     });
-    out.push({ lm, blend: f.blend, matrix: f.matrix });
+    out.push({ lm, blend: f.blend, matrix: f.matrix ? (f.matrix.data || f.matrix) : null });
   }
   faceTracks = out;
 }

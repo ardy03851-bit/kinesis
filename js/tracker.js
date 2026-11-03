@@ -54,27 +54,40 @@ export class Tracker {
       baseOptions: { modelAssetPath: model, delegate },
       runningMode: 'VIDEO',
     });
-    const tryCreate = async (Cls, extra, model, label) => {
+    const tryCreate = async (Cls, extra, model, label, delegateOverride = null, timeoutMs = 4000) => {
+      const useDelegate = delegateOverride || cfg.delegate;
+      const withTimeout = (p, ms) => Promise.race([
+        p,
+        new Promise((_, rej) => setTimeout(() => rej(new Error(`timed out after ${ms}ms`)), ms)),
+      ]);
       try {
-        log?.(`Loading ${label}`, `${cfg.delegate} delegate`);
-        const o = await Cls.createFromOptions(fileset, { ...makeOpts(model, cfg.delegate), ...extra });
-        this.activeDelegate = cfg.delegate;
+        log?.(`Loading ${label}`, `${useDelegate} delegate`);
+        const o = await withTimeout(Cls.createFromOptions(fileset, { ...makeOpts(model, useDelegate), ...extra }), timeoutMs);
+        this.activeDelegate = useDelegate;
         return o;
       } catch (e) {
-        if (cfg.delegate === 'GPU') {
-          console.warn('GPU delegate failed, falling back to CPU', e);
+        if (useDelegate === 'GPU') {
+          console.warn('GPU delegate failed or hung, falling back to CPU', e);
           log?.(`Retrying ${label}`, 'CPU fallback');
-          this.activeDelegate = 'CPU';
-          return Cls.createFromOptions(fileset, { ...makeOpts(model, 'CPU'), ...extra });
+          try {
+            const o = await withTimeout(Cls.createFromOptions(fileset, { ...makeOpts(model, 'CPU'), ...extra }), timeoutMs * 2);
+            this.activeDelegate = 'CPU';
+            return o;
+          } catch (e2) {
+            console.warn('CPU fallback also failed for ' + label, e2);
+            throw e2;
+          }
         }
         throw e;
       }
     };
 
     if (this.kind === 'objects') {
+      // EfficientDet's GPU delegate hangs on several browsers (notably Safari/WKWebView)
+      // — run the detector on CPU, which is fast for this model family.
       this.objects = await tryCreate(V.ObjectDetector, {
         scoreThreshold: cfg.objScore, maxResults: cfg.objMax,
-      }, MODELS.objects[cfg.objModel] || MODELS.objects.fp16, 'object detector (COCO-80)');
+      }, MODELS.objects[cfg.objModel] || MODELS.objects.int8, 'object detector (COCO-80)', 'CPU');
     } else if (this.kind === 'face') {
       this.face = await tryCreate(V.FaceLandmarker, {
         numFaces: cfg.faceMax,

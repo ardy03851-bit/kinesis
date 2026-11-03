@@ -72,6 +72,7 @@ export class Overlay2D {
 
     for (const hand of scene.hands) {
       if (S.hull) this.drawHull(S, hand);
+      if (S.fanMesh) this.drawFans(S, hand, t);
       if (S.palmMesh) this.drawPalm(S, hand, t);
       if (S.tracers) this.updateAndDrawTrails(S, hand, t);
       if (S.showBones) this.drawBones(S, hand, t);
@@ -921,6 +922,24 @@ export class Overlay2D {
           ctx.beginPath(); ctx.moveTo(ex, ey); ctx.lineTo(ex - Math.cos(a - 0.4) * 8, ey - Math.sin(a - 0.4) * 8); ctx.moveTo(ex, ey); ctx.lineTo(ex - Math.cos(a + 0.4) * 8, ey - Math.sin(a + 0.4) * 8); ctx.stroke();
         }
       }
+      if (S.objPredict && Math.hypot(o.vx, o.vy) > 15) {
+        // trajectory prediction: dashed lead line + ghost box at the projected position
+        const cx = r.x + r.w / 2, cy = r.y + r.h / 2;
+        const lead = S.objPredictMs / 1000;
+        const px = cx + o.vx * lead, py = cy + o.vy * lead;
+        const m = 1 - Math.min(0.9, Math.hypot(o.vx, o.vy) / 900);
+        ctx.save();
+        ctx.globalAlpha = 0.28 + 0.3 * m;
+        ctx.strokeStyle = c; ctx.lineWidth = 1.4;
+        ctx.setLineDash([7, 6]);
+        ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(px, py); ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.globalAlpha *= 0.8;
+        this.rrect(px - r.w / 2, py - r.h / 2, r.w, r.h, 7); ctx.stroke();
+        // centre marker
+        ctx.beginPath(); ctx.moveTo(px - 6, py); ctx.lineTo(px + 6, py); ctx.moveTo(px, py - 6); ctx.lineTo(px, py + 6); ctx.stroke();
+        ctx.restore();
+      }
       if (S.objLock) {
         this.objLocks = this.objLocks || new Map();
         let Lk = this.objLocks.get(o.id); if (!Lk) { Lk = { t0: t }; this.objLocks.set(o.id, Lk); }
@@ -1018,6 +1037,31 @@ export class Overlay2D {
           ctx.fillStyle = S.secondary; ctx.beginPath(); ctx.arc(c.x, c.y, 1.5, 0, 7); ctx.fill();
         }
       }
+      if (S.faceAura) {
+        // centroid + radius of the mesh
+        let cx = 0, cy = 0;
+        for (const p of P) { cx += p.x; cy += p.y; }
+        cx /= P.length; cy /= P.length;
+        let r = 0;
+        for (const p of P) r = Math.max(r, Math.hypot(p.x - cx, p.y - cy));
+        // dominant expression drives intensity
+        const dom = (face.blend || [])
+          .filter((c) => c.categoryName && c.categoryName !== '_neutral')
+          .sort((a, b) => b.score - a.score)[0];
+        const inten = dom ? clamp(dom.score, 0, 1) : 0;
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        for (let k = 0; k < 3; k++) {
+          const ph = (((t / 1500 + k / 3) % 1) + 1) % 1;
+          ctx.globalAlpha = (1 - ph) * (0.14 + inten * 0.4);
+          ctx.strokeStyle = dom && inten > 0.12 ? S.accent : S.secondary;
+          ctx.lineWidth = 1.5 + inten;
+          ctx.beginPath();
+          ctx.arc(cx, cy, r * (1.05 + ph * (S.faceAuraRange - 1.05) + k * 0.045), 0, Math.PI * 2);
+          ctx.stroke();
+        }
+        ctx.restore();
+      }
       if (S.faceBBox) {
         let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
         for (const i of FACE_RINGS.oval) { x0 = Math.min(x0, P[i].x); y0 = Math.min(y0, P[i].y); x1 = Math.max(x1, P[i].x); y1 = Math.max(y1, P[i].y); }
@@ -1113,6 +1157,82 @@ export class Overlay2D {
         });
       }
     }
+  }
+
+  // ---------------- twin fan mesh ----------------
+  // Two counter-rotating turbine meshes suspended in the palm.
+  drawFans(S, hand, t) {
+    const { ctx } = this;
+    const palm = hand.pts[9];
+    const R = Math.max(22, (hand.palmPx || 70) * 0.5 * S.fanSize);
+    const TAU = Math.PI * 2;
+
+    // motion sync: fan speed follows hand velocity
+    let boost = 1;
+    if (S.fanSync) {
+      const prev = this.fanPrev?.get(hand.id);
+      if (prev) {
+        const dt = Math.max(0.008, (t - prev.t) / 1000);
+        const v = Math.hypot(palm.x - prev.x, palm.y - prev.y) / dt;
+        boost = 1 + Math.min(3.2, v / ((hand.palmPx || 70) * 1.4));
+      }
+      (this.fanPrev ??= new Map()).set(hand.id, { x: palm.x, y: palm.y, t });
+    }
+    const spin = (t / 1000) * S.fanSpeed * boost;
+
+    ctx.save();
+    if (S.fanGlow) ctx.globalCompositeOperation = 'lighter';
+
+    if (S.fanStyle === 'pulse') {
+      for (let k = 0; k < 3; k++) {
+        const ph = ((spin * 0.35 + k / 3) % 1 + 1) % 1;
+        ctx.globalAlpha = (1 - ph) * 0.5;
+        ctx.strokeStyle = S.accent; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.arc(palm.x, palm.y, Math.max(2, R * ph), 0, TAU); ctx.stroke();
+        const ph2 = (((-spin * 0.55 + k / 3 + 0.5) % 1) + 1) % 1;
+        ctx.globalAlpha = (1 - ph2) * 0.32;
+        ctx.strokeStyle = S.secondary;
+        ctx.beginPath(); ctx.arc(palm.x, palm.y, Math.max(2, R * ph2), 0, TAU); ctx.stroke();
+      }
+    } else if (S.fanStyle === 'vortex') {
+      this.fanBlades(palm, R * 1.18, S.fanBlades, spin * 0.8, S.accent, 2.4);
+      this.fanBlades(palm, R * 0.6, Math.max(3, S.fanBlades - 1), -spin * 1.9, S.secondary, 1.5);
+      if (S.fanMeshRing) this.fanRing(palm, R * 0.88, S.fanBlades * 2, -spin * 0.4, rgba(toHex(S.secondary), 0.45), 1);
+    } else {
+      // twin counter-rotors
+      this.fanBlades(palm, R, S.fanBlades, spin, S.accent, 2.2);
+      this.fanBlades(palm, R * 0.55, Math.max(3, S.fanBlades - 1), -spin * 1.7, S.secondary, 1.6);
+      if (S.fanMeshRing) this.fanRing(palm, R, S.fanBlades, spin, rgba(toHex(S.accent), 0.5), 1);
+    }
+    ctx.restore();
+  }
+
+  fanBlades(c, R, n, spin, col, lw) {
+    const { ctx } = this;
+    ctx.strokeStyle = col; ctx.lineWidth = lw; ctx.lineCap = 'round';
+    const TAU = Math.PI * 2;
+    for (let i = 0; i < n; i++) {
+      const a = spin + (i * TAU) / n;
+      ctx.beginPath();
+      ctx.moveTo(c.x + Math.cos(a) * R * 0.14, c.y + Math.sin(a) * R * 0.14);
+      ctx.quadraticCurveTo(
+        c.x + Math.cos(a + 0.18) * R * 0.62, c.y + Math.sin(a + 0.18) * R * 0.62,
+        c.x + Math.cos(a + 0.42) * R, c.y + Math.sin(a + 0.42) * R,
+      );
+      ctx.stroke();
+    }
+  }
+
+  fanRing(c, R, n, spin, col, lw) {
+    const { ctx } = this;
+    ctx.strokeStyle = col; ctx.lineWidth = lw; ctx.beginPath();
+    const TAU = Math.PI * 2;
+    for (let i = 0; i <= n; i++) {
+      const a = spin + (i * TAU) / n;
+      const x = c.x + Math.cos(a) * R, y = c.y + Math.sin(a) * R;
+      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
   }
 
   drawParticles(S, dt) {

@@ -222,6 +222,8 @@ export const SCHEMA = [
           { key: 'objTrails', type: 'toggle', label: 'Motion trails' },
           { key: 'objTrailLength', type: 'range', label: 'Trail length', min: 4, max: 90, step: 1, fmt: 'fr', showIf: 'objTrails' },
           { key: 'objVelocity', type: 'toggle', label: 'Velocity vectors' },
+          { key: 'objPredict', type: 'toggle', label: 'Trajectory prediction', desc: 'Dashed projected path from each contact\u2019s velocity.' },
+          { key: 'objPredictMs', type: 'range', label: 'Lead time', min: 300, max: 2000, step: 100, fmt: 'ms', showIf: 'objPredict' },
           { key: 'objLock', type: 'toggle', label: 'Target designators', desc: 'Acquire-and-lock brackets with lead line on each contact.' },
         ],
       },
@@ -249,6 +251,8 @@ export const SCHEMA = [
           { key: 'facePoints', type: 'toggle', label: 'Landmark cloud' },
           { key: 'facePointSize', type: 'range', label: 'Point size', min: 0.5, max: 4, step: 0.25, fmt: 'px', showIf: 'facePoints' },
           { key: 'faceIris', type: 'toggle', label: 'Iris tracking', desc: 'Rings and crosshairs on both irises.' },
+          { key: 'faceAura', type: 'toggle', label: 'Expression aura', desc: 'A pulsing halo around the face driven by the dominant expression.' },
+          { key: 'faceAuraRange', type: 'range', label: 'Aura reach', min: 1.05, max: 1.6, step: 0.05, fmt: 'x', showIf: 'faceAura' },
         ],
       },
       {
@@ -267,6 +271,20 @@ export const SCHEMA = [
   {
     id: 'effects', label: 'Effects', icon: 'sparkles', modes: ['hands'],
     sections: [
+      {
+        id: 'fan', label: 'Fan mesh',
+        controls: [
+          { key: 'fanMesh', type: 'toggle', label: 'Twin fan mesh', desc: 'Two counter-rotating turbine meshes suspended in each palm — speed follows your motion.' },
+          { key: 'fanStyle', type: 'select', label: 'Fan style', showIf: 'fanMesh',
+            options: [ { value: 'twin', label: 'Twin counter-rotors' }, { value: 'vortex', label: 'Vortex' }, { value: 'pulse', label: 'Pulse rings' } ] },
+          { key: 'fanBlades', type: 'range', label: 'Blades per fan', min: 3, max: 10, step: 1, showIf: 'fanMesh' },
+          { key: 'fanSpeed', type: 'range', label: 'Spin rate', min: 0.2, max: 4, step: 0.1, fmt: 'x', showIf: 'fanMesh' },
+          { key: 'fanSize', type: 'range', label: 'Fan radius', min: 0.4, max: 2.2, step: 0.05, fmt: 'x', showIf: 'fanMesh' },
+          { key: 'fanGlow', type: 'toggle', label: 'Additive glow', showIf: 'fanMesh' },
+          { key: 'fanMeshRing', type: 'toggle', label: 'Mesh ring', desc: 'Rotating polygon linking the blade tips.', showIf: 'fanMesh' },
+          { key: 'fanSync', type: 'toggle', label: 'Motion sync', desc: 'Fan speed follows hand velocity.', showIf: 'fanMesh' },
+        ],
+      },
       {
         id: 'tracers', label: 'Tracers',
         controls: [
@@ -334,6 +352,9 @@ export const SCHEMA = [
               { value: 'titanium', label: 'Titanium' },
               { value: 'graphite', label: 'Graphite' },
               { value: 'aerogel', label: 'Aerogel' },
+              { value: 'jade', label: 'Jade' },
+              { value: 'plasma', label: 'Plasma' },
+              { value: 'void', label: 'Void' },
             ] },
           { type: 'separator', label: 'Rig parameters' },
           { key: 'hand3dOpacity', type: 'range', label: 'Opacity', min: 0.1, max: 1, step: 0.05, fmt: 'pct', showIf: 'hand3d' },
@@ -459,14 +480,14 @@ export const DEFAULTS = {
   bodyAngles: true, bodyLean: true, bodyTilt: true, bodyVelocity: false,
   bodyTrail: false, bodyTrailLength: 26, bodyBBox: true, bodyPosture: true,
 
-  objModel: 'fp16', objScore: 0.5, objMax: 12,
+  objModel: 'int8', objScore: 0.5, objMax: 12,
   objBoxes: true, objBoxStyle: 'bracket', objFill: false, objLabels: true, objConfidence: true,
   objIds: true, objScan: true, objTrails: true, objTrailLength: 24, objVelocity: true,
-  objLock: true, objRadar: true, objRange: true, objHistogram: true,
+  objLock: true, objRadar: true, objRange: true, objHistogram: true, objPredict: false, objPredictMs: 900,
 
   faceModel: 'landmarker', faceMax: 2, faceDetectConf: 0.5,
   faceMesh: true, faceMeshStyle: 'neon', faceContour: true, facePoints: false, facePointSize: 1.25,
-  faceIris: true, faceHead: true, faceGizmo: true, faceBlend: true, faceBlendCount: 6,
+  faceIris: true, faceAura: false, faceAuraRange: 1.2, faceHead: true, faceGizmo: true, faceBlend: true, faceBlendCount: 6,
   faceExpr: true, faceBBox: true,
 
   showBones: true, boneStyle: 'neon', boneWidth: 3, depthWidth: true, palmMesh: true,
@@ -474,6 +495,8 @@ export const DEFAULTS = {
   colorMode: 'accent', accent: '#9fc9a6', secondary: '#d4a24c', opacity: 1,
 
   tracers: true, tracerStyle: 'ribbon', tracerLength: 28, tracerWidth: 4, tracerTips: 'index',
+  fanMesh: false, fanStyle: 'twin', fanBlades: 6, fanSpeed: 1, fanSize: 1,
+  fanGlow: true, fanMeshRing: true, fanSync: true,
   crosshairs: true, crosshairStyle: 'tactical', crosshairTips: 'index', crosshairSize: 26, coords: true,
   bbox: true, palmHud: false, velocity: false,
   pinchLine: true, lightning: false, stringWeb: false, particles: false, particleRate: 4, hull: false,
@@ -503,6 +526,11 @@ export const PRESETS = [
     id: 'hologram', name: 'Hologram', icon: 'scan', desc: 'Volumetric hologram hand over a cold, dim feed.',
     swatch: ['#4a5d7a', '#05070d'],
     values: { boneStyle: 'pulse', colorMode: 'accent', accent: '#8fb3ff', jointShape: 'circle', tracers: true, tracerStyle: 'comet', crosshairs: false, bbox: false, palmHud: true, hand3d: true, hand3dStyle: 'hologram', hand3dTint: '#8fb3ff', hand3dGlow: true, videoFilter: 'cyan', videoDim: 0.55, scanlines: true, grid: true, scanSweep: false, lightning: false, particles: false, hull: false, bodyBoneStyle: 'neon', faceMeshStyle: 'thin' },
+  },
+  {
+    id: 'twinfan', name: 'Twin Fan', icon: 'orbit', desc: 'Counter-rotating turbine meshes in each palm, synced to your motion.',
+    swatch: ['#9fc9a6', '#0a0d0f'],
+    values: { boneStyle: 'neon', colorMode: 'accent', accent: '#9fc9a6', secondary: '#d4a24c', jointShape: 'ring', tracers: true, tracerStyle: 'comet', tracerTips: 'all', crosshairs: true, crosshairStyle: 'circle', bbox: false, palmHud: false, fanMesh: true, fanStyle: 'twin', fanBlades: 6, fanSpeed: 1.2, fanSize: 1.1, fanGlow: true, fanMeshRing: true, fanSync: true, lightning: false, particles: true, hull: false, hand3d: false, videoFilter: 'none', videoDim: 0.75, grid: true, scanlines: false, frameHud: true, bodyBoneStyle: 'neon', faceMeshStyle: 'neon' },
   },
   {
     id: 'cyber', name: 'Engage', icon: 'zap', desc: 'Arc discharge between contacts with lock-on targeting.',

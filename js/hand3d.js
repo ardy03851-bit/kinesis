@@ -282,6 +282,16 @@ export class Hand3D {
       case 'aerogel':
         body = new THREE.MeshPhysicalMaterial({ color: T.clone().lerp(new THREE.Color(0xffffff), 0.65), roughness: 0.22, metalness: 0, transparent: true, opacity: 0.3, transmission: 0.55, thickness: 1.6, envMapIntensity: 1.4, depthWrite: false });
         joint = body; palm = body; break;
+      case 'jade':
+        body = new THREE.MeshPhysicalMaterial({ color: T.clone().lerp(new THREE.Color(0x1d6b4f), 0.45), roughness: 0.28, metalness: 0.05, transmission: 0.35, thickness: 2.2, ior: 1.5, clearcoat: 0.8, clearcoatRoughness: 0.25, envMapIntensity: 1.1 });
+        joint = body; palm = body; break;
+      case 'plasma':
+        body = new THREE.MeshPhysicalMaterial({ color: T.clone().lerp(new THREE.Color(0x3a1f66), 0.4), emissive: T.clone().multiplyScalar(0.55), emissiveIntensity: 1.6, roughness: 0.35, metalness: 0.2, transparent: true, opacity: 0.88, envMapIntensity: 1.6 });
+        joint = body; palm = body; break;
+      case 'void':
+        body = new THREE.MeshStandardMaterial({ color: 0x07080a, roughness: 0.42, metalness: 0.85, envMapIntensity: 1.2 });
+        joint = new THREE.MeshStandardMaterial({ color: 0x07080a, roughness: 0.28, metalness: 0.95, emissive: T.clone().multiplyScalar(0.12), envMapIntensity: 1.6 });
+        palm = body; break;
       default: // mannequin
         body = std({ color: 0xd8d2c8, roughness: 0.58, metalness: 0.0, envMapIntensity: 0.6 });
         joint = body;

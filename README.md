@@ -18,10 +18,12 @@ What Kinesis tracks is switchable at any time (Tracking › What to track, or ke
 - One Euro smoothing with motion prediction, stable track IDs, dropout hold
 - 2D skeleton styles: solid, neon, dashed, double, tapered, pulse; joint shapes; colour modes (accent, per-finger, depth, spectrum, per-hand, left/right)
 - Hand effects: tracers, tip crosshairs, bounding frames, palm HUD, velocity vectors, arcs, string web, particles, air painting
-- 3D hand rig (three.js) in 15 materials: mannequin, hologram, robot, x-ray, glass, wireframe, neon, ghost, chrome, gold, carbon fibre, obsidian, titanium, graphite, aerogel — with optional 3D forearm
+- 3D hand rig (three.js) in 18 materials: mannequin, hologram, robot, x-ray, glass, wireframe, neon, ghost, chrome, gold, carbon fibre, obsidian, titanium, graphite, aerogel, jade, plasma, void — with optional 3D forearm
+- Twin fan mesh: two counter-rotating turbine meshes per palm (twin / vortex / pulse styles, motion-synced speed, mesh rings)
+- Face: expression-driven aura halo; objects: dashed trajectory prediction with lead ghost box
 - Tactical layer: boresight reticle, bearing tape, rangefinder, target designator with lock-on and AZ/EL readout, contact radar
 - Scene: video filters (thermal, noir, invert, cyan, mono, night), dim, grid, scanlines, vignette, frame HUD
-- 9 presets, searchable settings panel, export / import / share-link of settings
+- 10 presets, searchable settings panel, export / import / share-link of settings
 - Soft-machine UI: capsule controls, rounded glass panels and rounded on-canvas HUD chips and panels — no hard squares
 - Installable PWA with a proper home-screen icon set (SVG + 192/512 PNG + maskable, full-bleed apple-touch-icon)
 - Photo capture and video recording, fullscreen, wake lock, offline cache, installable PWA
