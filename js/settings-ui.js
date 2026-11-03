@@ -22,20 +22,24 @@ export class SettingsUI {
     this.rail = panel.querySelector('.rail');
     this.body = panel.querySelector('.panel-body');
     this.search = panel.querySelector('#settings-search');
+    this.rail.addEventListener('click', (e) => {
+      const b = e.target.closest('.rail-btn'); if (!b) return;
+      this.tab = b.dataset.tab; this.search.value = ''; this.renderTab();
+    });
     this.buildRail();
     this.renderTab();
     this.search.addEventListener('input', () => this.renderTab());
   }
 
+  // Tabs, sections and controls may declare `modes`; only entries matching
+  // the active tracking mode are shown. Switching mode re-renders the panel.
+  modeOK(item) { return !item.modes || item.modes.includes(this.state.trackingMode); }
+
   buildRail() {
-    this.rail.innerHTML = SCHEMA.map((t) => `
+    this.rail.innerHTML = SCHEMA.filter((t) => this.modeOK(t)).map((t) => `
       <button class="rail-btn" data-tab="${t.id}" role="tab" aria-label="${t.label}" title="${t.label}">
         ${icon(t.icon)}<span>${t.label}</span>
       </button>`).join('') + '<span class="rail-ind" aria-hidden="true"></span>';
-    this.rail.addEventListener('click', (e) => {
-      const b = e.target.closest('.rail-btn'); if (!b) return;
-      this.tab = b.dataset.tab; this.search.value = ''; this.renderTab();
-    });
   }
 
   moveIndicator() {
@@ -51,21 +55,25 @@ export class SettingsUI {
 
   renderTab() {
     const q = this.search.value.trim().toLowerCase();
+    this.buildRail();
     let html = '';
     if (q) {
-      for (const t of SCHEMA) for (const s of t.sections) {
-        if (!s.controls) continue;
-        const ctrls = s.controls.filter((c) => (c.label + ' ' + (c.desc || '') + ' ' + s.label + ' ' + t.label).toLowerCase().includes(q));
+      for (const t of SCHEMA.filter((t) => this.modeOK(t))) for (const s of t.sections) {
+        if (!s.controls || !this.modeOK(s)) continue;
+        const ctrls = s.controls.filter((c) => this.modeOK(c) && (c.label + ' ' + (c.desc || '') + ' ' + s.label + ' ' + t.label).toLowerCase().includes(q));
         if (ctrls.length) html += this.sectionHTML({ ...s, label: `${t.label} / ${s.label}` }, ctrls);
       }
       if (!html) html = `<div class="empty">${icon('search')}<p>No settings match “${esc(q)}”.</p><span>Try “tracer”, “3d”, “glow” or “arm”.</span></div>`;
     } else {
-      const tab = SCHEMA.find((t) => t.id === this.tab);
+      const tabs = SCHEMA.filter((t) => this.modeOK(t));
+      let tab = tabs.find((t) => t.id === this.tab);
+      if (!tab) { tab = tabs[0]; this.tab = tab.id; }
       html = `<header class="tab-head"><div class="tab-ico">${icon(tab.icon)}</div><div><h2>${tab.label}</h2><p>${tabBlurb[tab.id] || ''}</p></div></header>`;
       for (const s of tab.sections) {
+        if (!this.modeOK(s)) continue;
         if (s.type === 'presets') html += this.presetsHTML();
         else if (s.type === 'system') html += this.systemHTML();
-        else html += this.sectionHTML(s, s.controls);
+        else html += this.sectionHTML(s, s.controls.filter((c) => this.modeOK(c)));
       }
     }
     this.body.innerHTML = html;
@@ -86,6 +94,8 @@ export class SettingsUI {
     const attrs = `data-key="${c.key}" ${c.showIf ? `data-show-if="${c.showIf}"` : ''}`;
     const badge = c.reinit || c.reinitCamera ? `<span class="badge" title="Reloads the model">${icon('refresh-cw')}</span>` : '';
     switch (c.type) {
+      case 'separator':
+        return `<div class="ctl-sep"><i></i><span>${esc(c.label || '')}</span><i></i></div>`;
       case 'toggle':
         return `<label class="row ctl toggle-row" ${attrs}>
           <div class="lbl"><span>${esc(c.label)}${badge}</span>${desc}</div>
@@ -244,8 +254,11 @@ export class SettingsUI {
 
 const tabBlurb = {
   presets: 'One-tap visual profiles tuned for different looks.',
-  tracking: 'Models, confidence thresholds and signal filtering.',
+  tracking: 'What Kinesis tracks, the models behind it, and signal filtering.',
   skeleton: 'How bones, joints and colour are drawn.',
+  body: 'Full-body skeleton, posture analysis and instrumentation.',
+  objects: 'Object detection frames, motion analysis and tactical plots.',
+  face: 'Face mesh, iris tracking, expression blendshapes and head attitude.',
   effects: 'Tracers, reticles and interactive effects.',
   model3d: 'A lit 3D hand rig fitted to your hand in real time.',
   arm: 'Pose-model arm bones joined to the wrist.',

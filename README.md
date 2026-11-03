@@ -1,24 +1,33 @@
 # Kinesis
 
-Real-time hand and arm tracking in the browser. Point your iPad (or any device) camera at your hands and Kinesis draws a live skeleton, a 3D hand model and a wide set of HUD effects over them.
+A real-time optical tracking instrument that runs entirely in the browser. Point a camera at the scene and Kinesis tracks hands, full bodies, faces and objects — drawing live skeletons, 3D rigs and a tactical instrumentation layer over the feed. Nothing ever leaves the device.
 
 Live: https://ardy03851-bit.github.io/kinesis/
 
+## Tracking modes
+
+What Kinesis tracks is switchable at any time (Tracking › What to track, or keys 1/2/9/4). Switching the target reloads the neural pipeline and presents a dedicated settings surface for that mode.
+
+- **Hands** — 21-landmark hand mesh, up to 4 hands, gestures, pinch in millimetres, optional pose-model arms
+- **Body** — 33-point full-body skeleton with posture analysis: torso lean, shoulder tilt, elbow/knee flexion, velocity vectors, wrist tracers
+- **Objects** — COCO-80 object detection (EfficientDet-Lite0) with track IDs, confidence gauges, motion trails, velocity vectors, rangefinder, contact radar, class census and lock-on designators
+- **Face** — 478-point face mesh, iris tracking, 52 blendshape coefficients with live telemetry bars, head attitude (yaw/pitch/roll) with artificial-horizon gauge
+
 ## Features
-- MediaPipe Hand Landmarker / Gesture Recognizer (21 landmarks per hand, up to 4 hands), optional Pose Landmarker for full arms, with GPU and CPU fallback
-- One Euro smoothing with motion prediction, stable hand IDs, pinch detection in millimetres, gesture recognition
-- 2D skeleton styles: solid, neon, dashed, double, tapered, pulse; joint shapes, colour modes (accent, rainbow, depth, velocity, per-finger)
-- Effects: tracers (ribbon, comet, dots), tip crosshairs, bounding frames, palm HUD, velocity vectors, lightning arcs, two-hand string web, particles, ripples, convex hull, air painting
-- 3D hand rig (three.js) in 10 materials: mannequin, hologram, robot, x-ray, glass, wireframe, neon, ghost, chrome, gold, with optional 3D forearm
+- Models: MediaPipe Hand Landmarker / Gesture Recognizer, Pose Landmarker (lite/full/heavy), Object Detector, Face Landmarker — with GPU/CPU fallback
+- One Euro smoothing with motion prediction, stable track IDs, dropout hold
+- 2D skeleton styles: solid, neon, dashed, double, tapered, pulse; joint shapes; colour modes (accent, per-finger, depth, spectrum, per-hand, left/right)
+- Hand effects: tracers, tip crosshairs, bounding frames, palm HUD, velocity vectors, arcs, string web, particles, air painting
+- 3D hand rig (three.js) in 15 materials: mannequin, hologram, robot, x-ray, glass, wireframe, neon, ghost, chrome, gold, carbon fibre, obsidian, titanium, graphite, aerogel — with optional 3D forearm
 - Tactical layer: boresight reticle, bearing tape, rangefinder, target designator with lock-on and AZ/EL readout, contact radar
-- Scene: video filters (thermal, noir, invert, cyan, mono), dim, grid, scanlines, vignette, frame HUD
-- 9 presets (including Recon), searchable settings panel, export / import / share-link of settings
+- Scene: video filters (thermal, noir, invert, cyan, mono, night), dim, grid, scanlines, vignette, frame HUD
+- 9 presets, searchable settings panel, export / import / share-link of settings
 - Photo capture and video recording, fullscreen, wake lock, offline cache, installable PWA
 
 ## Using on iPad
-Open the site in Safari, tap Start and allow camera access. Use Share > Add to Home Screen for a full-screen app.
+Open the site in Safari, tap Initialise and allow camera access. Use Share > Add to Home Screen for a full-screen app.
 
-Keyboard: S settings, H hide UI, P pause, R record, C capture, F fullscreen, M mirror, 3 toggle 3D, Esc close.
+Keyboard: S settings, H hide UI, P pause, R record, C capture, F fullscreen, M mirror, 3 toggle 3D, 1 hands, 2 body, 9 objects, 4 face, Esc close.
 
 ## Development
 Static site, no build step: `python3 -m http.server` in this folder.

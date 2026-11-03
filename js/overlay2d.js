@@ -1,5 +1,6 @@
-// 2D overlay renderer: skeleton, arms, tracers, reticles, effects.
-import { HAND_BONES, LANDMARK_FINGER, TIPS, FINGER_NAMES, PALM_TRIS, tipsFor, convexHull, clamp, jointAngle } from './geometry.js';
+// 2D overlay renderer: skeleton, arms, tracers, reticles, effects,
+// full-body skeleton, object detections and face mesh.
+import { HAND_BONES, LANDMARK_FINGER, TIPS, FINGER_NAMES, PALM_TRIS, POSE_BONES, FACE_RINGS, tipsFor, convexHull, clamp, jointAngle } from './geometry.js';
 
 const MONO = '"Geist Mono", ui-monospace, monospace';
 const FINGER_COLORS = ['#f5b84b', '#9fc9a6', '#8fb3ff', '#c6f36b', '#ff5d73'];
@@ -86,6 +87,9 @@ export class Overlay2D {
       if (S.particles) this.emit(S, hand, scene.dt);
     }
     this.drawTactical(S, scene, t);
+    if (S.trackingMode === 'body' && scene.body) this.drawBody(S, scene, t);
+    if (S.trackingMode === 'objects') this.drawObjects(S, scene, t);
+    if (S.trackingMode === 'face') this.drawFace(S, scene, t);
     if (S.lightning && scene.hands.length >= 2) this.drawLightning(S, scene.hands[0].pts[8], scene.hands[1].pts[8], S.secondary, 3);
     if (!S.tracers && this.trails.size) this.trails.clear();
     this.prune(scene);
@@ -159,7 +163,7 @@ export class Overlay2D {
         ctx.textAlign = 'center'; ctx.fillStyle = col; ctx.fillText(`RNG ${rng.toFixed(0)} CM`, c.x, c.y + 70 * hand.scale);
       }
     });
-    if (S.radar) {
+    if (S.radar && S.trackingMode === 'hands') {
       const R = Math.min(64, w * 0.12), rx = w - R - 28, ry = h - R - 160;
       ctx.fillStyle = 'rgba(5,7,8,.6)'; ctx.beginPath(); ctx.arc(rx, ry, R, 0, 7); ctx.fill();
       ctx.strokeStyle = rgba(col, 0.5); ctx.lineWidth = 1;
@@ -181,7 +185,7 @@ export class Overlay2D {
 
   prune(scene) {
     const live = new Set(scene.hands.map((h) => h.id));
-    for (const k of this.trails.keys()) if (!live.has(+k.split(':')[0])) this.trails.delete(k);
+    for (const k of this.trails.keys()) if (!k.startsWith('body:') && !live.has(+k.split(':')[0])) this.trails.delete(k);
   }
 
   // ---------------- skeleton ----------------
@@ -638,6 +642,440 @@ export class Overlay2D {
     this.ctx.setLineDash([]);
     const m = { x: (l.x + r.x) / 2, y: (l.y + r.y) / 2 };
     this.shape('diamond', m.x, m.y, 4, S.accent);
+  }
+
+  // ---------------- full body ----------------
+  bodyCol(S, i, lm) {
+    if (S.bodyColorMode === 'accent') return S.accent;
+    if (S.bodyColorMode === 'depth') return depthColor(0.5 - (lm[i]?.z ?? 0) * 5);
+    return i % 2 ? S.accent : S.secondary; // odd indices = left side
+  }
+
+  drawBody(S, scene, t) {
+    const { ctx } = this; const B = scene.body;
+    const P = B.pts, LM = B.lm, aspect = scene.aspect || 1.5;
+    const vis = (i) => (LM[i]?.v ?? 1) > 0.4;
+    const scale = Math.hypot(P[11].x - P[12].x, P[11].y - P[12].y) || 100; // shoulder width px
+    const k = clamp(scale / 120, 0.5, 2.2);
+
+    if (S.bodyTrail) {
+      for (const wi of [15, 16]) {
+        const key = 'body:' + wi;
+        let arr = this.trails.get(key);
+        if (!arr) { arr = []; this.trails.set(key, arr); }
+        arr.push({ x: P[wi].x, y: P[wi].y, t });
+        while (arr.length > S.bodyTrailLength) arr.shift();
+        if (arr.length > 2) {
+          const col = this.bodyCol(S, wi, LM);
+          for (let i = 1; i < arr.length; i++) {
+            const kk = i / arr.length;
+            ctx.strokeStyle = rgba(toHex(col), kk * 0.7);
+            ctx.lineWidth = Math.max(0.6, 3 * kk * k);
+            ctx.beginPath(); ctx.moveTo(arr[i - 1].x, arr[i - 1].y); ctx.lineTo(arr[i].x, arr[i].y); ctx.stroke();
+          }
+        }
+      }
+    } else if (this.trails.size) {
+      for (const key of this.trails.keys()) if (key.startsWith('body:')) this.trails.delete(key);
+    }
+
+    if (S.bodyBones) {
+      const style = S.bodyBoneStyle;
+      for (const [a, b] of POSE_BONES) {
+        if (!vis(a) || !vis(b)) continue;
+        const col = this.bodyCol(S, b, LM);
+        let w = S.bodyBoneWidth * k;
+        if (S.bodyDepthWidth) w *= clamp(1 - (LM[b]?.z ?? 0) * 2.2, 0.6, 1.5);
+        if (style === 'neon') {
+          ctx.globalCompositeOperation = 'lighter';
+          this.seg(P[a], P[b], w * 3.4, rgba(toHex(col), 0.16));
+          this.seg(P[a], P[b], w * 1.9, rgba(toHex(col), 0.34));
+          ctx.globalCompositeOperation = 'source-over';
+          this.seg(P[a], P[b], w, col);
+          this.seg(P[a], P[b], Math.max(0.6, w * 0.3), 'rgba(255,255,255,0.8)');
+        } else if (style === 'dashed') {
+          ctx.setLineDash([w * 2.2, w * 1.6]); ctx.lineCap = 'butt';
+          this.seg(P[a], P[b], w, col); ctx.lineCap = 'round'; ctx.setLineDash([]);
+        } else if (style === 'double') {
+          const dx = P[b].x - P[a].x, dy = P[b].y - P[a].y, L = Math.hypot(dx, dy) || 1;
+          const nx = (-dy / L) * w * 0.75, ny = (dx / L) * w * 0.75;
+          const lw = Math.max(1, w * 0.4);
+          this.seg({ x: P[a].x + nx, y: P[a].y + ny }, { x: P[b].x + nx, y: P[b].y + ny }, lw, col);
+          this.seg({ x: P[a].x - nx, y: P[a].y - ny }, { x: P[b].x - nx, y: P[b].y - ny }, lw, col);
+        } else {
+          this.seg(P[a], P[b], w, col);
+        }
+      }
+    }
+
+    if (S.bodyJoints) {
+      for (let i = 0; i < 33; i++) {
+        if (!vis(i) || (i >= 17 && i <= 22)) continue; // skip hand points (dense, noisy)
+        const col = this.bodyCol(S, i, LM);
+        let r = S.bodyJointSize * k;
+        if (S.bodyDepthWidth) r *= clamp(1 - (LM[i]?.z ?? 0) * 2.2, 0.6, 1.5);
+        this.shape(S.bodyJointShape, P[i].x, P[i].y, r, col);
+      }
+    }
+
+    // torso datum + lean
+    const mSh = { x: (P[11].x + P[12].x) / 2, y: (P[11].y + P[12].y) / 2 };
+    const mHp = { x: (P[23].x + P[24].x) / 2, y: (P[23].y + P[24].y) / 2 };
+    if (S.bodyLean && vis(11) && vis(23)) {
+      const up = Math.hypot(mSh.x - mHp.x, mSh.y - mHp.y) || 1;
+      const plumbX = mHp.x, plumbY = mHp.y - up * 1.35;
+      ctx.setLineDash([4, 5]);
+      this.seg({ x: plumbX, y: plumbY }, { x: plumbX, y: mHp.y + up * 0.15 }, 1, rgba(S.secondary, 0.55));
+      ctx.setLineDash([]);
+      this.seg(mHp, mSh, 1.4, S.secondary);
+      const leanDeg = Math.atan2(mSh.x - mHp.x, mHp.y - mSh.y) * 180 / Math.PI;
+      const mid = { x: (mHp.x + mSh.x) / 2, y: (mHp.y + mSh.y) / 2 };
+      this.readout(S, mid.x + 14 * k, mid.y, `LEAN ${leanDeg >= 0 ? '+' : ''}${leanDeg.toFixed(0)}°`, S.secondary);
+      if (S.bodyTilt && vis(11) && vis(12)) {
+        const tilt = Math.atan2(P[12].y - P[11].y, P[12].x - P[11].x) * 180 / Math.PI;
+        ctx.setLineDash([2, 4]);
+        this.seg({ x: P[11].x - 24 * k, y: P[11].y }, { x: P[12].x + 24 * k, y: P[12].y }, 1, rgba(S.accent, 0.5));
+        ctx.setLineDash([]);
+        this.readout(S, mSh.x, P[11].y - 16 * k, `TILT ${tilt >= 0 ? '+' : ''}${tilt.toFixed(0)}°`, S.accent);
+      }
+    }
+
+    // joint angles: elbows + knees
+    if (S.bodyAngles) {
+      const groups = [['ELBOW L', 11, 13, 15], ['ELBOW R', 12, 14, 16], ['KNEE L', 23, 25, 27], ['KNEE R', 24, 26, 28]];
+      ctx.font = `600 10px ${MONO}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      for (const [label, a, b, c] of groups) {
+        if (!vis(a) || !vis(b) || !vis(c)) continue;
+        const A = { x: LM[a].x * aspect, y: LM[a].y, z: LM[a].z * aspect };
+        const Bp = { x: LM[b].x * aspect, y: LM[b].y, z: LM[b].z * aspect };
+        const C = { x: LM[c].x * aspect, y: LM[c].y, z: LM[c].z * aspect };
+        const ang = Math.round(180 - jointAngle(A, Bp, C));
+        const col = b % 2 ? S.accent : S.secondary;
+        this.readout(S, P[b].x, P[b].y - 18 * k, `${label.split(' ')[0]} ${ang}°`, col);
+      }
+    }
+
+    if (S.bodyVelocity) {
+      for (const i of [15, 16, 27, 28]) {
+        const p = P[i]; const lm = LM[i];
+        const vx = (lm.vx || 0) * this.w * 0.1 * (S.mirror ? -1 : 1), vy = (lm.vy || 0) * this.h * 0.1;
+        const L = Math.hypot(vx, vy); if (L < 4) continue;
+        const kk = Math.min(1, 130 / L);
+        const ex = p.x + vx * kk, ey = p.y + vy * kk;
+        ctx.strokeStyle = S.secondary; ctx.lineWidth = 1.6;
+        ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(ex, ey); ctx.stroke();
+        const a = Math.atan2(ey - p.y, ex - p.x);
+        ctx.beginPath(); ctx.moveTo(ex, ey); ctx.lineTo(ex - Math.cos(a - 0.4) * 8, ey - Math.sin(a - 0.4) * 8); ctx.moveTo(ex, ey); ctx.lineTo(ex - Math.cos(a + 0.4) * 8, ey - Math.sin(a + 0.4) * 8); ctx.stroke();
+      }
+    }
+
+    if (S.bodyBBox) {
+      let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+      for (let i = 0; i < 33; i++) { if (!vis(i)) continue; x0 = Math.min(x0, P[i].x); y0 = Math.min(y0, P[i].y); x1 = Math.max(x1, P[i].x); y1 = Math.max(y1, P[i].y); }
+      const pad = 16 * k; x0 -= pad; y0 -= pad; x1 += pad; y1 += pad;
+      const col = S.accent;
+      const L = Math.min(26, (x1 - x0) * 0.18);
+      ctx.strokeStyle = col; ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(x0, y0 + L); ctx.lineTo(x0, y0); ctx.lineTo(x0 + L, y0);
+      ctx.moveTo(x1 - L, y0); ctx.lineTo(x1, y0); ctx.lineTo(x1, y0 + L);
+      ctx.moveTo(x1, y1 - L); ctx.lineTo(x1, y1); ctx.lineTo(x1 - L, y1);
+      ctx.moveTo(x0 + L, y1); ctx.lineTo(x0, y1); ctx.lineTo(x0, y1 - L);
+      ctx.stroke();
+      ctx.font = `600 10.5px ${MONO}`; ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
+      const label = `BODY-01 · TRACKING`;
+      const tw = ctx.measureText(label).width + 14;
+      ctx.fillStyle = col; ctx.fillRect(x0, y0 - 21, tw, 17);
+      ctx.fillStyle = '#071012'; ctx.fillText(label, x0 + 7, y0 - 12.5);
+    }
+
+    if (S.bodyPosture) {
+      const rows = [];
+      if (vis(11) && vis(23)) rows.push(['LEAN', `${(Math.atan2(mSh.x - mHp.x, mHp.y - mSh.y) * 180 / Math.PI).toFixed(0)}°`]);
+      if (vis(11) && vis(12)) rows.push(['TILT', `${(Math.atan2(P[12].y - P[11].y, P[12].x - P[11].x) * 180 / Math.PI).toFixed(0)}°`]);
+      for (const [label, a, b, c] of [['KNEE L', 23, 25, 27], ['KNEE R', 24, 26, 28]]) {
+        if (!vis(a) || !vis(b) || !vis(c)) continue;
+        const ang = Math.round(180 - jointAngle({ x: LM[a].x * aspect, y: LM[a].y, z: LM[a].z * aspect }, { x: LM[b].x * aspect, y: LM[b].y, z: LM[b].z * aspect }, { x: LM[c].x * aspect, y: LM[c].y, z: LM[c].z * aspect }));
+        rows.push([label, ang + '°']);
+      }
+      if (rows.length) this.panel(S, 18, 136, 118, rows.length * 17 + 10, 'POSTURE', rows, S.accent);
+    }
+  }
+
+  // Small HUD readout chip
+  readout(S, x, y, text, col) {
+    const { ctx } = this;
+    ctx.font = `600 10px ${MONO}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    const w = ctx.measureText(text).width + 10;
+    ctx.fillStyle = 'rgba(6,9,10,0.78)'; ctx.fillRect(x - w / 2, y - 8, w, 15);
+    ctx.fillStyle = col; ctx.fillText(text, x, y);
+  }
+
+  // Labelled HUD panel
+  panel(S, x, y, w, h, title, rows, col) {
+    const { ctx } = this;
+    ctx.fillStyle = 'rgba(5,7,8,.78)'; ctx.fillRect(x, y, w, h);
+    ctx.fillStyle = col; ctx.fillRect(x, y, 2, h);
+    ctx.strokeStyle = rgba(col, 0.4); ctx.lineWidth = 1; ctx.strokeRect(x, y, w, h);
+    ctx.font = `600 9.5px ${MONO}`; ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
+    ctx.fillStyle = rgba(col, 0.9); ctx.fillText(title, x + 8, y + 11);
+    rows.forEach(([k, v], i) => {
+      ctx.fillStyle = 'rgba(232,237,242,.6)'; ctx.fillText(k, x + 8, y + 26 + i * 17);
+      ctx.fillStyle = '#e8edf2'; ctx.textAlign = 'right'; ctx.fillText(v, x + w - 8, y + 26 + i * 17); ctx.textAlign = 'left';
+    });
+  }
+
+  // ---------------- object detection ----------------
+  drawObjects(S, scene, t) {
+    const { ctx, w, h } = this;
+    const objs = scene.objects || [];
+    const col = S.tacColor || S.accent;
+    const f = Math.max(w, h) * 0.87;
+
+    for (const o of objs) {
+      const r = o.rect;
+      if (r.w < 4 || r.h < 4) continue;
+      const isPerson = o.cls === 'person';
+      const c = isPerson ? col : S.secondary;
+      if (S.objFill) { ctx.fillStyle = rgba(c, 0.07); ctx.fillRect(r.x, r.y, r.w, r.h); }
+      if (S.objBoxes) {
+        ctx.strokeStyle = c; ctx.lineWidth = 1.5;
+        if (S.objBoxStyle === 'full') { ctx.strokeRect(r.x, r.y, r.w, r.h); }
+        else if (S.objBoxStyle === 'dashed') { ctx.setLineDash([6, 5]); ctx.strokeRect(r.x, r.y, r.w, r.h); ctx.setLineDash([]); }
+        else {
+          const L = Math.min(22, Math.min(r.w, r.h) * 0.22);
+          ctx.beginPath();
+          ctx.moveTo(r.x, r.y + L); ctx.lineTo(r.x, r.y); ctx.lineTo(r.x + L, r.y);
+          ctx.moveTo(r.x + r.w - L, r.y); ctx.lineTo(r.x + r.w, r.y); ctx.lineTo(r.x + r.w, r.y + L);
+          ctx.moveTo(r.x + r.w, r.y + r.h - L); ctx.lineTo(r.x + r.w, r.y + r.h); ctx.lineTo(r.x + r.w - L, r.y + r.h);
+          ctx.moveTo(r.x + L, r.y + r.h); ctx.lineTo(r.x, r.y + r.h); ctx.lineTo(r.x, r.y + r.h - L);
+          ctx.stroke();
+        }
+      }
+      if (S.objScan) {
+        ctx.save(); ctx.beginPath(); ctx.rect(r.x, r.y, r.w, r.h); ctx.clip();
+        const sy = r.y + ((t * 0.06 + o.id * 53) % (r.h + 40)) - 20;
+        ctx.strokeStyle = rgba(c, 0.55); ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(r.x, sy); ctx.lineTo(r.x + r.w, sy); ctx.stroke();
+        ctx.fillStyle = rgba(c, 0.1); ctx.fillRect(r.x, sy - 14, r.w, 14);
+        ctx.restore();
+      }
+      const head = [];
+      if (S.objLabels) {
+        head.push([`${o.cls.toUpperCase()}`, c]);
+        if (S.objConfidence) head.push([`${Math.round(o.score * 100)}%`, col]);
+        if (S.objIds) head[0] = [`OBJ-${String(o.id).padStart(2, '0')} · ${o.cls.toUpperCase()}`, c];
+      }
+      if (head.length) {
+        ctx.font = `600 10.5px ${MONO}`; ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
+        const bw = Math.max(...head.map(([s]) => ctx.measureText(s).width)) + 16;
+        const bh = head.length * 15 + 8;
+        const by = Math.max(r.y - bh - 4, 8);
+        ctx.fillStyle = 'rgba(5,7,8,.82)'; ctx.fillRect(r.x, by, bw, bh);
+        ctx.fillStyle = c; ctx.fillRect(r.x, by, 2, bh);
+        head.forEach(([s, cc], i) => { ctx.fillStyle = cc; ctx.fillText(s, r.x + 8, by + 11 + i * 15); });
+        if (S.objConfidence) {
+          const bwid = 54;
+          ctx.fillStyle = 'rgba(255,255,255,.12)'; ctx.fillRect(r.x, by + bh + 4, bwid, 3);
+          ctx.fillStyle = c; ctx.fillRect(r.x, by + bh + 4, bwid * clamp(o.score, 0, 1), 3);
+        }
+      }
+      if (S.objRange) {
+        const rng = isPerson ? clamp((168 * f) / r.h, 15, 800) : clamp((32 * f) / r.w, 5, 800);
+        this.readout(S, r.x + r.w / 2, r.y + r.h + 14, `RNG ${rng.toFixed(0)} CM`, c);
+      }
+      if (S.objTrails && o.hist.length > 1) {
+        ctx.lineWidth = 1.4;
+        for (let i = 1; i < o.hist.length; i++) {
+          const kk = i / o.hist.length;
+          ctx.strokeStyle = rgba(toHex(c), kk * 0.6);
+          ctx.beginPath(); ctx.moveTo(o.hist[i - 1].x, o.hist[i - 1].y); ctx.lineTo(o.hist[i].x, o.hist[i].y); ctx.stroke();
+        }
+      }
+      if (S.objVelocity) {
+        const cx = r.x + r.w / 2, cy = r.y + r.h / 2;
+        const L = Math.hypot(o.vx, o.vy);
+        if (L > 12) {
+          const kk = Math.min(1, 220 / L);
+          const ex = cx + o.vx * kk * 0.28, ey = cy + o.vy * kk * 0.28;
+          ctx.strokeStyle = c; ctx.lineWidth = 1.6;
+          ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(ex, ey); ctx.stroke();
+          const a = Math.atan2(ey - cy, ex - cx);
+          ctx.beginPath(); ctx.moveTo(ex, ey); ctx.lineTo(ex - Math.cos(a - 0.4) * 8, ey - Math.sin(a - 0.4) * 8); ctx.moveTo(ex, ey); ctx.lineTo(ex - Math.cos(a + 0.4) * 8, ey - Math.sin(a + 0.4) * 8); ctx.stroke();
+        }
+      }
+      if (S.objLock) {
+        this.objLocks = this.objLocks || new Map();
+        let Lk = this.objLocks.get(o.id); if (!Lk) { Lk = { t0: t }; this.objLocks.set(o.id, Lk); }
+        const kk = clamp((t - Lk.t0) / 900, 0, 1); const locked = kk >= 1;
+        const cx = r.x + r.w / 2, cy = r.y + r.h / 2;
+        const rr = Math.max(r.w, r.h) * 0.62 + 14;
+        const lc = locked ? '#e0624f' : c;
+        ctx.strokeStyle = lc; ctx.lineWidth = 1.4;
+        ctx.save(); ctx.translate(cx, cy); ctx.rotate(Math.PI / 4 * (1 - kk) + (locked ? 0 : t * 0.002));
+        ctx.beginPath(); ctx.moveTo(0, -rr); ctx.lineTo(rr, 0); ctx.lineTo(0, rr); ctx.lineTo(-rr, 0); ctx.closePath();
+        ctx.setLineDash(locked ? [] : [6, 5]); ctx.stroke(); ctx.setLineDash([]); ctx.restore();
+      }
+    }
+    const liveIds = new Set(objs.map((o) => o.id));
+    if (this.objLocks) for (const k of this.objLocks.keys()) if (!liveIds.has(k)) this.objLocks.delete(k);
+
+    if (S.objHistogram && objs.length) {
+      const counts = {};
+      for (const o of objs) counts[o.cls] = (counts[o.cls] || 0) + 1;
+      const rows = Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 6)
+        .map(([k, v]) => [k.toUpperCase(), String(v).padStart(2, '0')]);
+      this.panel(S, 18, h - 150 - rows.length * 17, 150, rows.length * 17 + 10, 'CLASS CENSUS', rows, S.secondary);
+    }
+    if (S.objRadar) {
+      const R = Math.min(64, w * 0.12), rx = w - R - 28, ry = h - R - 160;
+      ctx.fillStyle = 'rgba(5,7,8,.6)'; ctx.beginPath(); ctx.arc(rx, ry, R, 0, 7); ctx.fill();
+      ctx.strokeStyle = rgba(col, 0.5); ctx.lineWidth = 1;
+      for (const fk of [1, 0.66, 0.33]) { ctx.beginPath(); ctx.arc(rx, ry, R * fk, 0, 7); ctx.stroke(); }
+      ctx.beginPath(); ctx.moveTo(rx - R, ry); ctx.lineTo(rx + R, ry); ctx.moveTo(rx, ry - R); ctx.lineTo(rx, ry + R); ctx.stroke();
+      const a = (t * 0.0022) % (Math.PI * 2);
+      const gr = ctx.createConicGradient ? ctx.createConicGradient(a - 0.9, rx, ry) : null;
+      if (gr) { gr.addColorStop(0, 'rgba(0,0,0,0)'); gr.addColorStop(0.14, rgba(col, 0.28)); gr.addColorStop(0.1433, 'rgba(0,0,0,0)'); gr.addColorStop(1, 'rgba(0,0,0,0)'); ctx.fillStyle = gr; ctx.beginPath(); ctx.arc(rx, ry, R, 0, 7); ctx.fill(); }
+      const f2 = Math.max(w, h) * 0.87;
+      for (const o of objs) {
+        const r = o.rect;
+        const rng = o.cls === 'person' ? clamp((168 * f2) / r.h, 15, 800) : clamp((32 * f2) / r.w, 5, 800);
+        const bx = rx + (((r.x + r.w / 2) / w) - 0.5) * 2 * R * 0.85;
+        const by = ry + R - clamp(rng / 300, 0, 1) * 2 * R * 0.9;
+        ctx.fillStyle = o.cls === 'person' ? col : S.secondary;
+        ctx.beginPath(); ctx.arc(bx, by, 3, 0, 7); ctx.fill();
+      }
+      ctx.fillStyle = rgba(col, 0.8); ctx.font = `600 10px ${MONO}`; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+      ctx.fillText(`CONTACTS ${String(objs.length).padStart(2, '0')}`, rx, ry + R + 12);
+    }
+  }
+
+  // ---------------- face mesh ----------------
+  drawFace(S, scene, t) {
+    const { ctx, w, h } = this;
+    const faces = scene.faces || [];
+    for (const face of faces) {
+      const P = face.pts;
+      const col = S.accent;
+      const stroke = (ring, color, width) => {
+        if (ring.length < 2) return;
+        ctx.strokeStyle = color; ctx.lineWidth = width;
+        ctx.beginPath();
+        ring.forEach((idx, i) => (i ? ctx.lineTo(P[idx].x, P[idx].y) : ctx.moveTo(P[idx].x, P[idx].y)));
+        ctx.closePath(); ctx.stroke();
+      };
+      if (S.faceMesh) {
+        const groups = [
+          [FACE_RINGS.oval, S.faceContour ? 2.2 : 1.4],
+          [FACE_RINGS.browL, 1.2], [FACE_RINGS.browR, 1.2],
+          [FACE_RINGS.eyeL, 1.2], [FACE_RINGS.eyeR, 1.2],
+          [FACE_RINGS.lipsOuter, 1.2], [FACE_RINGS.lipsInner, 1],
+        ];
+        for (const [ring, wd] of groups) {
+          if (S.faceMeshStyle === 'neon') {
+            ctx.globalCompositeOperation = 'lighter';
+            stroke(ring, rgba(toHex(col), 0.18), wd * 3.2);
+            ctx.globalCompositeOperation = 'source-over';
+            stroke(ring, col, wd);
+          } else if (S.faceMeshStyle === 'thin') {
+            stroke(ring, rgba(toHex(col), 0.55), Math.max(0.6, wd * 0.5));
+          } else {
+            stroke(ring, col, wd);
+          }
+        }
+      }
+      if (S.facePoints) {
+        ctx.fillStyle = rgba(toHex(S.secondary), 0.7);
+        for (let i = 0; i < P.length; i += 2) {
+          ctx.beginPath(); ctx.arc(P[i].x, P[i].y, S.facePointSize, 0, 7); ctx.fill();
+        }
+      }
+      if (S.faceIris) {
+        for (const ring of [FACE_RINGS.irisL, FACE_RINGS.irisR]) {
+          const c = { x: ring.reduce((s, i) => s + P[i].x, 0) / ring.length, y: ring.reduce((s, i) => s + P[i].y, 0) / ring.length };
+          const rr = Math.hypot(P[ring[0]].x - c.x, P[ring[0]].y - c.y);
+          ctx.strokeStyle = S.secondary; ctx.lineWidth = 1.3;
+          ctx.beginPath(); ctx.arc(c.x, c.y, rr + 2, 0, 7); ctx.stroke();
+          ctx.beginPath(); ctx.moveTo(c.x - rr - 6, c.y); ctx.lineTo(c.x - rr - 1, c.y); ctx.moveTo(c.x + rr + 1, c.y); ctx.lineTo(c.x + rr + 6, c.y);
+          ctx.moveTo(c.x, c.y - rr - 6); ctx.lineTo(c.x, c.y - rr - 1); ctx.moveTo(c.x, c.y + rr + 1); ctx.lineTo(c.x, c.y + rr + 6); ctx.stroke();
+          ctx.fillStyle = S.secondary; ctx.beginPath(); ctx.arc(c.x, c.y, 1.5, 0, 7); ctx.fill();
+        }
+      }
+      if (S.faceBBox) {
+        let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+        for (const i of FACE_RINGS.oval) { x0 = Math.min(x0, P[i].x); y0 = Math.min(y0, P[i].y); x1 = Math.max(x1, P[i].x); y1 = Math.max(y1, P[i].y); }
+        const pad = 16; x0 -= pad; y0 -= pad; x1 += pad; y1 += pad;
+        const L = 22;
+        ctx.strokeStyle = col; ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(x0, y0 + L); ctx.lineTo(x0, y0); ctx.lineTo(x0 + L, y0);
+        ctx.moveTo(x1 - L, y0); ctx.lineTo(x1, y0); ctx.lineTo(x1, y0 + L);
+        ctx.moveTo(x1, y1 - L); ctx.lineTo(x1, y1); ctx.lineTo(x1 - L, y1);
+        ctx.moveTo(x0 + L, y1); ctx.lineTo(x0, y1); ctx.lineTo(x0, y1 - L);
+        ctx.stroke();
+        ctx.font = `600 10.5px ${MONO}`; ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
+        const label = 'FACE-01 · LOCK';
+        const tw = ctx.measureText(label).width + 14;
+        ctx.fillStyle = col; ctx.fillRect(x0, y0 - 21, tw, 17);
+        ctx.fillStyle = '#071012'; ctx.fillText(label, x0 + 7, y0 - 12.5);
+      }
+      if (S.faceHead && face.matrix) {
+        const m = face.matrix;
+        const pitch = Math.asin(clamp(-m[9], -1, 1)) * 180 / Math.PI;
+        const yaw = Math.atan2(m[8], m[10]) * 180 / Math.PI;
+        const roll = Math.atan2(m[1], m[5]) * 180 / Math.PI;
+        const rows = [['YAW', `${yaw >= 0 ? '+' : ''}${yaw.toFixed(1)}°`], ['PITCH', `${pitch >= 0 ? '+' : ''}${pitch.toFixed(1)}°`], ['ROLL', `${roll >= 0 ? '+' : ''}${roll.toFixed(1)}°`]];
+        this.panel(S, w - 150, 136, 120, rows.length * 17 + 10, 'HEAD ATTITUDE', rows, S.secondary);
+        if (S.faceGizmo) {
+          const gx = w - 86, gy = 136 + rows.length * 17 + 52;
+          const R = 30;
+          ctx.fillStyle = 'rgba(5,7,8,.7)'; ctx.beginPath(); ctx.arc(gx, gy, R + 8, 0, 7); ctx.fill();
+          ctx.strokeStyle = rgba(S.secondary, 0.6); ctx.lineWidth = 1; ctx.beginPath(); ctx.arc(gx, gy, R, 0, 7); ctx.stroke();
+          ctx.save();
+          ctx.beginPath(); ctx.arc(gx, gy, R, 0, 7); ctx.clip();
+          ctx.translate(gx, gy); ctx.rotate(-roll * Math.PI / 180);
+          const off = clamp(pitch / 45, -1, 1) * R;
+          ctx.fillStyle = 'rgba(255,255,255,.08)'; ctx.fillRect(-R, -R, R * 2, R + off);
+          ctx.strokeStyle = S.accent; ctx.lineWidth = 1.4;
+          ctx.beginPath(); ctx.moveTo(-R, off); ctx.lineTo(R, off); ctx.stroke();
+          for (let i = -2; i <= 2; i++) { const yy = off + i * 7; ctx.beginPath(); ctx.moveTo(i % 2 ? -6 : -12, yy); ctx.lineTo(12, yy); ctx.stroke(); }
+          ctx.restore();
+          ctx.strokeStyle = S.secondary; ctx.lineWidth = 1.6;
+          ctx.beginPath(); ctx.moveTo(gx, gy - R); ctx.lineTo(gx, gy - R + 8); ctx.moveTo(gx - 4, gy - R + 12); ctx.lineTo(gx, gy - R + 8); ctx.lineTo(gx + 4, gy - R + 12); ctx.stroke();
+        }
+      }
+    }
+    const face = faces[0];
+    if (face && S.faceBlend && face.blend) {
+      const cats = face.blend.filter((c) => c.categoryName !== '_neutral').sort((a, b) => b.score - a.score).slice(0, S.faceBlendCount);
+      const bw = 250, bh = cats.length * 16 + 30;
+      const bx = w / 2 - bw / 2, by = h - 170 - bh;
+      ctx.fillStyle = 'rgba(5,7,8,.8)'; ctx.fillRect(bx, by, bw, bh);
+      ctx.strokeStyle = rgba(S.accent, 0.35); ctx.lineWidth = 1; ctx.strokeRect(bx, by, bw, bh);
+      ctx.font = `600 9.5px ${MONO}`; ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
+      ctx.fillStyle = rgba(S.accent, 0.9); ctx.fillText('BLENDSHAPE TELEMETRY', bx + 10, by + 12);
+      cats.forEach((c, i) => {
+        const yy = by + 30 + i * 16;
+        ctx.fillStyle = 'rgba(232,237,242,.75)'; ctx.fillText(c.categoryName.toUpperCase(), bx + 10, yy);
+        ctx.fillStyle = 'rgba(255,255,255,.1)'; ctx.fillRect(bx + 140, yy - 3, 96, 6);
+        ctx.fillStyle = S.accent; ctx.fillRect(bx + 140, yy - 3, 96 * clamp(c.score, 0, 1), 6);
+        ctx.fillStyle = '#e8edf2'; ctx.textAlign = 'right'; ctx.fillText(Math.round(c.score * 100) + '%', bx + bw - 10, yy); ctx.textAlign = 'left';
+      });
+      if (S.faceExpr && cats.length) {
+        const top = cats[0];
+        const el = document.getElementById('gesture');
+        if (el) {
+          const label = `EXPR · ${top.categoryName.toUpperCase()} ${Math.round(top.score * 100)}%`;
+          if (el.dataset.expr !== label) {
+            el.dataset.expr = label;
+            el.innerHTML = `<b>${top.categoryName.replace(/([A-Z])/g, ' $1').trim().toUpperCase()}</b><span>coefficient ${Math.round(top.score * 100)}%</span>`;
+            el.classList.remove('show'); void el.offsetWidth; el.classList.add('show');
+            clearTimeout(this._exprTimer);
+            this._exprTimer = setTimeout(() => { el.classList.remove('show'); el.dataset.expr = ''; }, 1200);
+          }
+        }
+      }
+    }
   }
 
   // ---------------- particles & ripples ----------------

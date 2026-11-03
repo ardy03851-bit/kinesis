@@ -89,6 +89,9 @@ function applyVisuals() {
   $('#telemetry').classList.toggle('hidden', !S.telemetry);
   $('#spark').classList.toggle('hidden', !S.fpsGraph);
   c3d.classList.toggle('hidden', !S.hand3d);
+  const handsOnly = S.trackingMode === 'hands';
+  $('#btn-3d').classList.toggle('hidden', !handsOnly);
+  $('#btn-paint').classList.toggle('hidden', !handsOnly);
 }
 
 // ---------------- camera ----------------
@@ -135,6 +138,8 @@ const stats = { renderFps: 0, inferHz: 0, ms: 0, frames: 0, infers: 0, last: per
 let lastVideoTime = -1, lastInfer = 0;
 
 function ingest(res, now) {
+  if (res.objects) ingestObjects(res.objects, now);
+  if (res.faces) ingestFaces(res.faces, now);
   const dets = res.hands;
   const used = new Set();
   // greedy match by wrist distance
@@ -160,10 +165,74 @@ function ingest(res, now) {
     poseSmoothed = p.map((q, i) => {
       const f = poseFilters[i];
       const mc = S.smoothing ? S.smoothMinCutoff * 0.8 : 1e4, b = S.smoothing ? S.smoothBeta * 40 : 0;
-      return { x: f[0].filter(q.x, now, mc, b), y: f[1].filter(q.y, now, mc, b), z: f[2].filter(q.z, now, mc, b), v: q.visibility ?? 1 };
+      const sm = { x: f[0].filter(q.x, now, mc, b), y: f[1].filter(q.y, now, mc, b), z: f[2].filter(q.z, now, mc, b), v: q.visibility ?? 1 };
+      sm.vx = f[0].vel; sm.vy = f[1].vel;
+      return sm;
     });
-  } else if (!S.armTracking) poseSmoothed = null;
+  } else if (!S.armTracking || S.trackingMode !== 'hands') poseSmoothed = null;
   else if (res.pose === null) poseSmoothed = null;
+}
+
+// ---------------- object tracks ----------------
+let objTracks = [], objNext = 1;
+function objCenter(b) { return { x: (b.x0 + b.x1) / 2, y: (b.y0 + b.y1) / 2 }; }
+function ingestObjects(dets, now) {
+  const VW = L.vw || 1, VH = L.vh || 1;
+  const norm = (d) => ({
+    cls: d.categories[0].categoryName,
+    score: d.categories[0].score,
+    x0: d.boundingBox.originX / VW, y0: d.boundingBox.originY / VH,
+    x1: (d.boundingBox.originX + d.boundingBox.width) / VW, y1: (d.boundingBox.originY + d.boundingBox.height) / VH,
+  });
+  const nd = dets.map(norm).filter((d) => d.cls);
+  const used = new Set();
+  const pairs = [];
+  objTracks.forEach((t, ti) => nd.forEach((d, di) => pairs.push([Math.hypot(objCenter(t.box).x - objCenter(d).x, objCenter(t.box).y - objCenter(d).y), ti, di])));
+  pairs.sort((a, b) => a[0] - b[0]);
+  const tUsed = new Set();
+  for (const [dd, ti, di] of pairs) {
+    if (dd > 0.22 || tUsed.has(ti) || used.has(di)) continue;
+    tUsed.add(ti); used.add(di); updateObj(objTracks[ti], nd[di], now);
+  }
+  nd.forEach((d, di) => {
+    if (used.has(di)) return;
+    const t = { id: objNext++, cls: d.cls, score: d.score, box: { ...d }, hist: [], vx: 0, vy: 0, missing: 0, fresh: true };
+    objTracks.push(t); updateObj(t, d, now);
+  });
+  objTracks.forEach((t, ti) => { if (!tUsed.has(ti) && !t.fresh) t.missing++; t.fresh = false; });
+  objTracks = objTracks.filter((t) => t.missing <= S.holdFrames);
+}
+function updateObj(t, d, now) {
+  const dt = Math.max(0.001, (now - (t.lastT || now)) / 1000);
+  const prev = objCenter(t.box);
+  t.box.x0 += (d.x0 - t.box.x0) * 0.5; t.box.y0 += (d.y0 - t.box.y0) * 0.5;
+  t.box.x1 += (d.x1 - t.box.x1) * 0.5; t.box.y1 += (d.y1 - t.box.y1) * 0.5;
+  t.score = t.score ? t.score * 0.7 + d.score * 0.3 : d.score;
+  t.cls = d.cls; t.missing = 0; t.fresh = true; t.lastT = now;
+  const c = objCenter(t.box);
+  t.vx = t.vx * 0.6 + ((c.x - prev.x) * (L.vw || 1) / dt) * 0.4;
+  t.vy = t.vy * 0.6 + ((c.y - prev.y) * (L.vh || 1) / dt) * 0.4;
+  t.hist.push({ x: c.x, y: c.y });
+  while (t.hist.length > S.objTrailLength) t.hist.shift();
+}
+
+// ---------------- face tracks ----------------
+let faceTracks = [];
+function ingestFaces(faces, now) {
+  const n = Math.min(faces.length, S.faceMax || 2);
+  const out = [];
+  for (let i = 0; i < n; i++) {
+    const f = faces[i];
+    const prev = faceTracks[i];
+    const lm = f.landmarks.map((p, j) => {
+      if (prev && prev.lm[j]) {
+        return { x: prev.lm[j].x + (p.x - prev.lm[j].x) * 0.55, y: prev.lm[j].y + (p.y - prev.lm[j].y) * 0.55, z: prev.lm[j].z + (p.z - prev.lm[j].z) * 0.55 };
+      }
+      return { x: p.x, y: p.y, z: p.z };
+    });
+    out.push({ lm, blend: f.blend, matrix: f.matrix });
+  }
+  faceTracks = out;
 }
 
 function update(t, d, now) {
@@ -259,7 +328,28 @@ function buildScene(now, dt) {
       });
     }
   }
-  return { hands, arms, shoulders, t: now, dt, map, w: L.w, h: L.h };
+  return { hands, arms, shoulders, t: now, dt, map, w: L.w, h: L.h, aspect: L.vw / L.vh };
+}
+
+// ---------------- mode scenes ----------------
+function buildModeScene(scene) {
+  if (S.trackingMode === 'body' && poseSmoothed) {
+    scene.body = { pts: poseSmoothed.map((p) => map(p.x, p.y)), lm: poseSmoothed };
+  }
+  if (S.trackingMode === 'objects') {
+    scene.objects = objTracks.map((t) => {
+      const a = map(t.box.x0, t.box.y0), b = map(t.box.x1, t.box.y1);
+      return {
+        id: t.id, cls: t.cls, score: t.score, vx: t.vx, vy: t.vy,
+        hist: t.hist.map((p) => map(p.x, p.y)),
+        rect: { x: Math.min(a.x, b.x), y: Math.min(a.y, b.y), w: Math.abs(b.x - a.x), h: Math.abs(b.y - a.y) },
+      };
+    });
+  }
+  if (S.trackingMode === 'face') {
+    scene.faces = faceTracks.map((f) => ({ pts: f.lm.map((p) => map(p.x, p.y)), blend: f.blend, matrix: f.matrix }));
+  }
+  return scene;
 }
 
 // ---------------- main loop ----------------
@@ -289,7 +379,7 @@ function loop() {
     }
   }
 
-  const scene = buildScene(now, dt);
+  const scene = buildModeScene(buildScene(now, dt));
   overlay.render(S, scene);
   if (S.hand3d && hand3d) hand3d.render(S, scene);
   else if (hand3d) hand3d.render(S, scene);
@@ -313,13 +403,54 @@ function updateTelemetry(now, scene) {
   $('#t-fps').textContent = stats.renderFps.toFixed(0);
   $('#t-hz').textContent = stats.inferHz.toFixed(0);
   $('#t-ms').textContent = stats.ms.toFixed(1);
-  $('#t-hands').textContent = scene.hands.length;
-  $('#t-gesture').textContent = S.gestures ? (scene.hands.map((h) => h.gesture).filter((g) => g !== 'Unknown').join(' / ') || '—') : 'off';
-  $('#t-arm').textContent = !S.armTracking ? 'off' : scene.arms.filter((a) => !a.estimated).length ? scene.arms.filter((a) => !a.estimated).map((a) => `${a.side} ${Math.round(a.angle)}°`).join(' · ') : 'searching';
-  $('#t-pinch').textContent = scene.hands[0]?.pinchMM != null ? scene.hands[0].pinchMM.toFixed(0) + ' mm' : '—';
+  $('#t-hands').textContent =
+    S.trackingMode === 'objects' ? scene.objects.length :
+    S.trackingMode === 'face' ? faceTracks.length :
+    S.trackingMode === 'body' ? (scene.body ? 1 : 0) : scene.hands.length;
+  const modeRows = {
+    hands: () => {
+      $('#t-gesture').textContent = S.gestures ? (scene.hands.map((h) => h.gesture).filter((g) => g !== 'Unknown').join(' / ') || '—') : 'off';
+      $('#t-pinch').textContent = scene.hands[0]?.pinchMM != null ? scene.hands[0].pinchMM.toFixed(0) + ' mm' : '—';
+      $('#t-arm').textContent = !S.armTracking ? 'off' : scene.arms.filter((a) => !a.estimated).length ? scene.arms.filter((a) => !a.estimated).map((a) => `${a.side} ${Math.round(a.angle)}°`).join(' · ') : 'searching';
+    },
+    body: () => {
+      const B = scene.body;
+      if (!B) { $('#t-gesture').textContent = '—'; $('#t-pinch').textContent = '—'; $('#t-arm').textContent = '—'; return; }
+      const P = B.lm;
+      $('#t-gesture').textContent = 'tracking';
+      const mSh = { x: (P[11].x + P[12].x) / 2, y: (P[11].y + P[12].y) / 2 };
+      const mHp = { x: (P[23].x + P[24].x) / 2, y: (P[23].y + P[24].y) / 2 };
+      $('#t-pinch').textContent = (Math.atan2(mSh.x - mHp.x, mHp.y - mSh.y) * 180 / Math.PI).toFixed(0) + '° lean';
+      const knee = (a, b, c) => Math.round(180 - jointAngle({ x: P[a].x * scene.aspect, y: P[a].y, z: P[a].z * scene.aspect }, { x: P[b].x * scene.aspect, y: P[b].y, z: P[b].z * scene.aspect }, { x: P[c].x * scene.aspect, y: P[c].y, z: P[c].z * scene.aspect })) + '°';
+      $('#t-arm').textContent = `${knee(23, 25, 27)} · ${knee(24, 26, 28)}`;
+    },
+    objects: () => {
+      const n = scene.objects.length;
+      const cls = [...new Set(scene.objects.map((o) => o.cls))];
+      $('#t-gesture').textContent = n ? `${n} contact${n > 1 ? 's' : ''}` : '—';
+      $('#t-pinch').textContent = n ? `${cls.length} class${cls.length > 1 ? 'es' : ''}` : '—';
+      $('#t-arm').textContent = n ? scene.objects[0].cls : '—';
+    },
+    face: () => {
+      const n = faceTracks.length;
+      const f = faceTracks[0];
+      $('#t-gesture').textContent = n ? `${n} face${n > 1 ? 's' : ''}` : '—';
+      if (f?.blend) {
+        const top = f.blend.filter((c) => c.categoryName !== '_neutral').sort((a, b) => b.score - a.score)[0];
+        $('#t-pinch').textContent = top ? top.categoryName : '—';
+      } else $('#t-pinch').textContent = '—';
+      if (f?.matrix) {
+        const m = f.matrix;
+        $('#t-arm').textContent = `y${(Math.atan2(m[8], m[10]) * 180 / Math.PI).toFixed(0)} p${(Math.asin(clamp(-m[9], -1, 1)) * 180 / Math.PI).toFixed(0)}`;
+      } else $('#t-arm').textContent = '—';
+    },
+  };
+  (modeRows[S.trackingMode] || modeRows.hands)();
   $('#chip-fps').textContent = `${stats.renderFps.toFixed(0)} FPS`;
-  const n = scene.hands.length;
-  setStatus(paused ? 'paused' : n ? 'tracking' : 'search', paused ? 'Paused' : n ? `Tracking ${n} hand${n > 1 ? 's' : ''}` : 'Searching');
+  const n = S.trackingMode === 'objects' ? scene.objects.length : S.trackingMode === 'face' ? faceTracks.length : scene.hands.length;
+  const label = { hands: 'hand', body: 'body', objects: 'contact', face: 'face' }[S.trackingMode] || 'contact';
+  const searching = S.trackingMode === 'body' ? !scene.body : n === 0;
+  setStatus(paused ? 'paused' : searching ? 'search' : 'tracking', paused ? 'Paused' : searching ? 'Searching' : `Tracking ${n} ${label}${n > 1 ? 's' : ''}`);
   drawSpark();
 }
 
@@ -462,12 +593,21 @@ function scheduleReinit(kind) {
 
 // ---------------- settings ----------------
 const VISUAL_KEYS = new Set(['mirror', 'videoFilter', 'videoDim', 'videoBlur', 'grid', 'scanlines', 'vignette', 'frameHud', 'scanSweep', 'uiAccent', 'reduceMotion', 'telemetry', 'fpsGraph', 'hand3d', 'hand3dShadow']);
+function setTrackingMode(v) {
+  S.trackingMode = v;
+  tracks = []; objTracks = []; faceTracks = []; poseSmoothed = null;
+  overlay.clearPaint();
+  applyVisuals(); ui.refresh();
+  toast(`Tracking mode: ${v}`, 'ok', 'cpu');
+}
+
 const ui = new SettingsUI({
   panel: $('#panel'), state: S,
   onChange(key, v, final) {
     if (final) return;
     delete S.__preset;
     const c = findControl(key);
+    if (key === 'trackingMode') { setTrackingMode(v); }
     if (VISUAL_KEYS.has(key)) applyVisuals();
     if (key === 'hand3d' && v) ensure3D();
     if (key === 'renderScale' || key === 'videoFit') layout();
@@ -484,8 +624,9 @@ const ui = new SettingsUI({
       toast(`${p.name} profile applied`, 'ok', p.icon);
     } else if (a === 'clearPaint') { overlay.clearPaint(); toast('Canvas cleared', 'ok', 'eraser'); }
     else if (a === 'reset') {
-      const needReinit = ['handModel', 'delegate', 'numHands', 'armTracking', 'poseModel', 'detectConf', 'presenceConf', 'trackConf'].some((k) => S[k] !== DEFAULTS[k]);
+      const needReinit = ['handModel', 'delegate', 'numHands', 'armTracking', 'poseModel', 'detectConf', 'presenceConf', 'trackConf', 'trackingMode', 'objModel', 'objScore', 'objMax', 'faceMax', 'faceDetectConf', 'bodyPoseConf', 'bodyTrackConf'].some((k) => S[k] !== DEFAULTS[k]);
       Object.keys(S).forEach((k) => delete S[k]); Object.assign(S, DEFAULTS);
+      tracks = []; objTracks = []; faceTracks = []; poseSmoothed = null;
       applyVisuals(); layout(); persist(); ui.refresh(); if (needReinit) scheduleReinit('model');
       toast('Defaults restored', 'ok', 'rotate-ccw');
     } else if (a === 'export') {
@@ -506,7 +647,7 @@ const ui = new SettingsUI({
 function updateDiag() {
   const d = $('#diag'); if (!d) return;
   const gl = (() => { try { const c = document.createElement('canvas').getContext('webgl2'); const e = c?.getExtension('WEBGL_debug_renderer_info'); return e ? c.getParameter(e.UNMASKED_RENDERER_WEBGL) : c ? 'WebGL2' : 'none'; } catch { return 'unknown'; } })();
-  d.innerHTML = [['Hand model', S.handModel === 'gesture' ? 'Gesture recognizer' : 'Hand landmarker'], ['Delegate', tracker.activeDelegate || '—'], ['Pose model', S.armTracking ? S.poseModel : 'off'], ['Video', `${video.videoWidth}×${video.videoHeight}`], ['Pixel ratio', L.dpr.toFixed(2)], ['GPU', gl]]
+  d.innerHTML = [['Mode', S.trackingMode], ['Hand model', S.handModel === 'gesture' ? 'Gesture recognizer' : 'Hand landmarker'], ['Delegate', tracker.activeDelegate || '—'], ['Pose model', S.armTracking || S.trackingMode === 'body' ? S.poseModel : 'off'], ['Video', `${video.videoWidth}×${video.videoHeight}`], ['Pixel ratio', L.dpr.toFixed(2)], ['GPU', gl]]
     .map(([k, v]) => `<div><span>${k}</span><b>${v}</b></div>`).join('');
 }
 
@@ -558,6 +699,13 @@ window.addEventListener('keydown', (e) => {
   else if (k === 'c') overlay.clearPaint();
   else if (k === 'm') { S.mirror = !S.mirror; applyVisuals(); persist(); }
   else if (k === '3') $('#btn-3d').click();
+  else if (k === '1' || k === '2' || k === '4') {
+    const m = { 1: 'hands', 2: 'body', 4: 'face' }[k];
+    if (S.trackingMode !== m) { setTrackingMode(m); scheduleReinit('model'); }
+  }
+  else if (k === '9') {
+    if (S.trackingMode !== 'objects') { setTrackingMode('objects'); scheduleReinit('model'); }
+  }
   else if (k === ' ') { e.preventDefault(); togglePause(); }
   else if (k === 'escape') setPanel(false);
 });

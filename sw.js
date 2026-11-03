@@ -1,5 +1,5 @@
 // Kinesis service worker: caches CDN runtime + models for fast, offline-capable reloads.
-const VERSION = 'kinesis-v2';
+const VERSION = 'kinesis-v3';
 const RUNTIME = 'kinesis-runtime-v1';
 const SHELL = ['./', './index.html', './css/app.css', './js/main.js', './js/config.js', './js/icons.js', './js/tracker.js', './js/geometry.js', './js/overlay2d.js', './js/hand3d.js', './js/settings-ui.js', './assets/icon.svg', './manifest.webmanifest'];
 self.addEventListener('install', (e) => { e.waitUntil(caches.open(VERSION).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting())); });

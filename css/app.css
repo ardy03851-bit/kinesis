@@ -206,6 +206,12 @@ body.panel-open .telemetry { opacity: 0; pointer-events: none; }
 .range-row .desc { margin-top: 6px; }
 output { font: 500 12px var(--mono); color: var(--accent); font-variant-numeric: tabular-nums; padding: 2px 7px; border-radius: 3px; background: color-mix(in srgb, var(--accent) 10%, transparent); }
 
+/* separator */
+.ctl-sep { display: flex; align-items: center; gap: 12px; padding: 16px 0 2px; }
+.ctl-sep i { flex: 1; height: 1px; background: var(--line-2); }
+.ctl-sep span { font: 600 10px var(--mono); letter-spacing: .16em; text-transform: uppercase; color: var(--faint); white-space: nowrap; }
+.card h3 + .ctl-sep, .card h3 + .ctl + .ctl-sep { padding-top: 10px; }
+
 /* switch */
 .toggle-row { cursor: pointer; }
 .switch { position: relative; width: 42px; height: 25px; flex: none; }

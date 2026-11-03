@@ -1,8 +1,11 @@
 // Settings schema, defaults and presets.
 // Every control in the settings panel is generated from SCHEMA.
+// Tabs, sections and controls may declare `modes` — they only appear while
+// that tracking mode is active, so switching what Kinesis tracks changes
+// the entire settings surface.
 
-export const VERSION = '1.0.0';
-export const STORAGE_KEY = 'kinesis.settings.v2';
+export const VERSION = '2.0.0';
+export const STORAGE_KEY = 'kinesis.settings.v3';
 
 const palette = [
   { value: '#9fc9a6', label: 'Signal' },
@@ -11,6 +14,13 @@ const palette = [
   { value: '#8fb3ff', label: 'Ice' },
   { value: '#c6f36b', label: 'Lime' },
   { value: '#f0f0f0', label: 'White' },
+];
+
+export const TRACKING_MODES = [
+  { value: 'hands', label: 'Hands' },
+  { value: 'body', label: 'Body' },
+  { value: 'objects', label: 'Objects' },
+  { value: 'face', label: 'Face' },
 ];
 
 export const SCHEMA = [
@@ -24,7 +34,16 @@ export const SCHEMA = [
     id: 'tracking', label: 'Tracking', icon: 'cpu',
     sections: [
       {
-        id: 'model', label: 'Neural models',
+        id: 'mode', label: 'Tracking mode',
+        controls: [
+          { key: 'trackingMode', type: 'segment', label: 'What to track', reinit: true,
+            options: TRACKING_MODES,
+            desc: 'Switching the tracking target reloads the neural pipeline and presents a dedicated set of settings.' },
+          { type: 'separator', label: 'Neural models' },
+        ],
+      },
+      {
+        id: 'model-hands', label: 'Hand models', modes: ['hands'],
         controls: [
           { key: 'handModel', type: 'segment', label: 'Hand model', reinit: true,
             options: [ { value: 'landmarker', label: 'Landmarker' }, { value: 'gesture', label: 'Gesture ML' } ],
@@ -38,13 +57,55 @@ export const SCHEMA = [
         ],
       },
       {
+        id: 'model-body', label: 'Body model', modes: ['body'],
+        controls: [
+          { key: 'poseModel', type: 'select', label: 'Pose model', reinit: true,
+            options: [ { value: 'lite', label: 'Lite' }, { value: 'full', label: 'Full' }, { value: 'heavy', label: 'Heavy' } ],
+            desc: '33-landmark full-body skeleton. Heavier models trade latency for accuracy.' },
+          { key: 'delegate', type: 'segment', label: 'Compute', reinit: true,
+            options: [ { value: 'GPU', label: 'GPU' }, { value: 'CPU', label: 'CPU' } ] },
+          { key: 'bodyPoseConf', type: 'range', label: 'Detection confidence', min: 0.1, max: 0.95, step: 0.05, reinit: true, fmt: 'pct' },
+          { key: 'bodyTrackConf', type: 'range', label: 'Tracking confidence', min: 0.1, max: 0.95, step: 0.05, reinit: true, fmt: 'pct' },
+        ],
+      },
+      {
+        id: 'model-objects', label: 'Object models', modes: ['objects'],
+        controls: [
+          { key: 'objModel', type: 'select', label: 'Detector model', reinit: true,
+            options: [
+              { value: 'fp16', label: 'EfficientDet-Lite0 · fp16' },
+              { value: 'int8', label: 'EfficientDet-Lite0 · int8' },
+              { value: 'fp32', label: 'EfficientDet-Lite0 · fp32' },
+            ],
+            desc: 'COCO-80 class detector. int8 is fastest, fp32 most accurate.' },
+          { key: 'delegate', type: 'segment', label: 'Compute', reinit: true,
+            options: [ { value: 'GPU', label: 'GPU' }, { value: 'CPU', label: 'CPU' } ] },
+          { key: 'objScore', type: 'range', label: 'Score threshold', min: 0.1, max: 0.9, step: 0.05, fmt: 'pct', reinit: true },
+          { key: 'objMax', type: 'range', label: 'Max results', min: 1, max: 25, step: 1, reinit: true },
+        ],
+      },
+      {
+        id: 'model-face', label: 'Face model', modes: ['face'],
+        controls: [
+          { key: 'faceModel', type: 'select', label: 'Face model', reinit: true,
+            options: [
+              { value: 'landmarker', label: 'FaceLandmarker · 478 pts' },
+            ],
+            desc: 'Face mesh with 478 landmarks, 52 blendshapes and head-pose matrix.' },
+          { key: 'delegate', type: 'segment', label: 'Compute', reinit: true,
+            options: [ { value: 'GPU', label: 'GPU' }, { value: 'CPU', label: 'CPU' } ] },
+          { key: 'faceMax', type: 'range', label: 'Max faces', min: 1, max: 4, step: 1, reinit: true },
+          { key: 'faceDetectConf', type: 'range', label: 'Detection confidence', min: 0.1, max: 0.95, step: 0.05, reinit: true, fmt: 'pct' },
+        ],
+      },
+      {
         id: 'filtering', label: 'Signal filtering',
         controls: [
           { key: 'smoothing', type: 'toggle', label: 'One-Euro smoothing', desc: 'Adaptive low-pass filter: steady when still, responsive when moving.' },
           { key: 'smoothMinCutoff', type: 'range', label: 'Stability', min: 0.1, max: 5, step: 0.1, showIf: 'smoothing', desc: 'Lower = steadier, more lag.' },
           { key: 'smoothBeta', type: 'range', label: 'Responsiveness', min: 0, max: 0.2, step: 0.005, showIf: 'smoothing' },
           { key: 'prediction', type: 'range', label: 'Latency prediction', min: 0, max: 60, step: 5, fmt: 'ms', desc: 'Extrapolates motion forward to hide inference latency.' },
-          { key: 'holdFrames', type: 'range', label: 'Dropout hold', min: 0, max: 15, step: 1, fmt: 'fr', desc: 'Keeps a hand alive briefly when tracking blinks.' },
+          { key: 'holdFrames', type: 'range', label: 'Dropout hold', min: 0, max: 15, step: 1, fmt: 'fr', desc: 'Keeps a track alive briefly when detection blinks.' },
         ],
       },
       {
@@ -60,7 +121,7 @@ export const SCHEMA = [
     ],
   },
   {
-    id: 'skeleton', label: 'Skeleton', icon: 'git-branch',
+    id: 'skeleton', label: 'Skeleton', icon: 'git-branch', modes: ['hands'],
     sections: [
       {
         id: 'bones', label: 'Bones',
@@ -98,7 +159,113 @@ export const SCHEMA = [
     ],
   },
   {
-    id: 'effects', label: 'Effects', icon: 'sparkles',
+    id: 'body', label: 'Body', icon: 'person-standing', modes: ['body'],
+    sections: [
+      {
+        id: 'body-bones', label: 'Skeleton',
+        controls: [
+          { key: 'bodyBones', type: 'toggle', label: 'Draw skeleton' },
+          { key: 'bodyBoneStyle', type: 'select', label: 'Bone style', showIf: 'bodyBones',
+            options: [ { value: 'solid', label: 'Solid' }, { value: 'neon', label: 'Glow' }, { value: 'dashed', label: 'Tactical dashed' }, { value: 'double', label: 'Twin rail' } ] },
+          { key: 'bodyBoneWidth', type: 'range', label: 'Thickness', min: 0.5, max: 14, step: 0.5, fmt: 'px', showIf: 'bodyBones' },
+          { key: 'bodyDepthWidth', type: 'toggle', label: 'Depth-scaled thickness', showIf: 'bodyBones' },
+          { key: 'bodyJoints', type: 'toggle', label: 'Draw joints' },
+          { key: 'bodyJointShape', type: 'select', label: 'Joint shape', showIf: 'bodyJoints',
+            options: [ { value: 'circle', label: 'Circle' }, { value: 'ring', label: 'Ring' }, { value: 'square', label: 'Square' }, { value: 'diamond', label: 'Diamond' }, { value: 'cross', label: 'Cross' } ] },
+          { key: 'bodyJointSize', type: 'range', label: 'Joint size', min: 1, max: 16, step: 0.5, fmt: 'px', showIf: 'bodyJoints' },
+        ],
+      },
+      {
+        id: 'body-color', label: 'Colour',
+        controls: [
+          { key: 'bodyColorMode', type: 'select', label: 'Colour mode',
+            options: [ { value: 'side', label: 'Left / right' }, { value: 'accent', label: 'Single accent' }, { value: 'depth', label: 'Depth heatmap' } ] },
+          { key: 'accent', type: 'color', label: 'Left accent', swatches: palette },
+          { key: 'secondary', type: 'color', label: 'Right accent', swatches: palette },
+          { key: 'opacity', type: 'range', label: 'Overlay opacity', min: 0.1, max: 1, step: 0.05, fmt: 'pct' },
+        ],
+      },
+      {
+        id: 'body-analysis', label: 'Analysis',
+        controls: [
+          { key: 'bodyAngles', type: 'toggle', label: 'Joint angle readouts', desc: 'Live flexion angles at elbows and knees.' },
+          { key: 'bodyLean', type: 'toggle', label: 'Torso lean vector', desc: 'Plumb line from mid-hip to mid-shoulder with deviation in degrees.' },
+          { key: 'bodyTilt', type: 'toggle', label: 'Shoulder level', desc: 'Horizontal datum across the shoulders with tilt readout.' },
+          { key: 'bodyVelocity', type: 'toggle', label: 'Velocity vectors', desc: 'Motion vectors on wrists and ankles.' },
+          { key: 'bodyTrail', type: 'toggle', label: 'Wrist tracers' },
+          { key: 'bodyTrailLength', type: 'range', label: 'Tracer length', min: 4, max: 90, step: 1, fmt: 'fr', showIf: 'bodyTrail' },
+          { key: 'bodyBBox', type: 'toggle', label: 'Bounding frame' },
+          { key: 'bodyPosture', type: 'toggle', label: 'Posture panel', desc: 'Consolidated lean, tilt and knee readouts.' },
+        ],
+      },
+    ],
+  },
+  {
+    id: 'objects', label: 'Objects', icon: 'scan-search', modes: ['objects'],
+    sections: [
+      {
+        id: 'obj-boxes', label: 'Detections',
+        controls: [
+          { key: 'objBoxes', type: 'toggle', label: 'Bounding frames' },
+          { key: 'objBoxStyle', type: 'select', label: 'Frame style', showIf: 'objBoxes',
+            options: [ { value: 'bracket', label: 'Corner brackets' }, { value: 'full', label: 'Full frame' }, { value: 'dashed', label: 'Dashed' } ] },
+          { key: 'objFill', type: 'toggle', label: 'Silhouette fill', showIf: 'objBoxes' },
+          { key: 'objLabels', type: 'toggle', label: 'Class labels' },
+          { key: 'objConfidence', type: 'toggle', label: 'Confidence gauges', showIf: 'objLabels' },
+          { key: 'objIds', type: 'toggle', label: 'Track identifiers' },
+          { key: 'objScan', type: 'toggle', label: 'Scan sweep', desc: 'Analytical scan line sweeping each detection.' },
+        ],
+      },
+      {
+        id: 'obj-motion', label: 'Motion',
+        controls: [
+          { key: 'objTrails', type: 'toggle', label: 'Motion trails' },
+          { key: 'objTrailLength', type: 'range', label: 'Trail length', min: 4, max: 90, step: 1, fmt: 'fr', showIf: 'objTrails' },
+          { key: 'objVelocity', type: 'toggle', label: 'Velocity vectors' },
+          { key: 'objLock', type: 'toggle', label: 'Target designators', desc: 'Acquire-and-lock brackets with lead line on each contact.' },
+        ],
+      },
+      {
+        id: 'obj-tactical', label: 'Tactical',
+        controls: [
+          { key: 'objRadar', type: 'toggle', label: 'Contact radar', desc: 'Plan-view radar plotting every detection by bearing and range.' },
+          { key: 'objRange', type: 'toggle', label: 'Rangefinder', desc: 'Estimated camera distance per contact.' },
+          { key: 'objHistogram', type: 'toggle', label: 'Class census', desc: 'Live tally of detected classes.' },
+          { key: 'tacColor', type: 'color', label: 'Tactical colour', swatches: palette },
+        ],
+      },
+    ],
+  },
+  {
+    id: 'face', label: 'Face', icon: 'scan-face', modes: ['face'],
+    sections: [
+      {
+        id: 'face-mesh', label: 'Mesh',
+        controls: [
+          { key: 'faceMesh', type: 'toggle', label: 'Face mesh', desc: '478-landmark wireframe locked to the face.' },
+          { key: 'faceMeshStyle', type: 'select', label: 'Mesh style', showIf: 'faceMesh',
+            options: [ { value: 'neon', label: 'Neon' }, { value: 'solid', label: 'Solid' }, { value: 'thin', label: 'Hairline' } ] },
+          { key: 'faceContour', type: 'toggle', label: 'Contour emphasis', showIf: 'faceMesh', desc: 'Heavier stroke on the face oval.' },
+          { key: 'facePoints', type: 'toggle', label: 'Landmark cloud' },
+          { key: 'facePointSize', type: 'range', label: 'Point size', min: 0.5, max: 4, step: 0.25, fmt: 'px', showIf: 'facePoints' },
+          { key: 'faceIris', type: 'toggle', label: 'Iris tracking', desc: 'Rings and crosshairs on both irises.' },
+        ],
+      },
+      {
+        id: 'face-analysis', label: 'Analysis',
+        controls: [
+          { key: 'faceHead', type: 'toggle', label: 'Head orientation', desc: 'Yaw, pitch and roll from the transformation matrix.' },
+          { key: 'faceGizmo', type: 'toggle', label: 'Attitude indicator', showIf: 'faceHead', desc: 'Artificial-horizon gauge for head attitude.' },
+          { key: 'faceBlend', type: 'toggle', label: 'Blendshape telemetry', desc: 'Live bars for the strongest expression coefficients.' },
+          { key: 'faceBlendCount', type: 'range', label: 'Bars shown', min: 3, max: 12, step: 1, showIf: 'faceBlend' },
+          { key: 'faceExpr', type: 'toggle', label: 'Expression readout', desc: 'Names the dominant expression coefficient.' },
+          { key: 'faceBBox', type: 'toggle', label: 'Bounding frame' },
+        ],
+      },
+    ],
+  },
+  {
+    id: 'effects', label: 'Effects', icon: 'sparkles', modes: ['hands'],
     sections: [
       {
         id: 'tracers', label: 'Tracers',
@@ -144,7 +311,7 @@ export const SCHEMA = [
     ],
   },
   {
-    id: 'model3d', label: '3D Hand', icon: 'box',
+    id: 'model3d', label: '3D Hand', icon: 'box', modes: ['hands'],
     sections: [
       {
         id: 'mesh', label: 'Volumetric hand',
@@ -162,7 +329,13 @@ export const SCHEMA = [
               { value: 'wire', label: 'Wireframe' },
               { value: 'neon', label: 'Neon tube' },
               { value: 'ghost', label: 'Ghost' },
+              { value: 'carbon', label: 'Carbon fibre' },
+              { value: 'obsidian', label: 'Obsidian' },
+              { value: 'titanium', label: 'Titanium' },
+              { value: 'graphite', label: 'Graphite' },
+              { value: 'aerogel', label: 'Aerogel' },
             ] },
+          { type: 'separator', label: 'Rig parameters' },
           { key: 'hand3dOpacity', type: 'range', label: 'Opacity', min: 0.1, max: 1, step: 0.05, fmt: 'pct', showIf: 'hand3d' },
           { key: 'hand3dThickness', type: 'range', label: 'Finger girth', min: 0.5, max: 1.8, step: 0.05, fmt: 'x', showIf: 'hand3d' },
           { key: 'hand3dDepth', type: 'range', label: 'Depth exaggeration', min: 0, max: 3, step: 0.1, fmt: 'x', showIf: 'hand3d' },
@@ -181,7 +354,7 @@ export const SCHEMA = [
     ],
   },
   {
-    id: 'arm', label: 'Arm', icon: 'bone',
+    id: 'arm', label: 'Arm', icon: 'bone', modes: ['hands'],
     sections: [
       {
         id: 'armtrack', label: 'Arm tracking',
@@ -236,7 +409,7 @@ export const SCHEMA = [
         controls: [
           { key: 'telemetry', type: 'toggle', label: 'Telemetry panel' },
           { key: 'fpsGraph', type: 'toggle', label: 'Performance graph', showIf: 'telemetry' },
-          { key: 'handLabels', type: 'toggle', label: 'Hand ID tags' },
+          { key: 'handLabels', type: 'toggle', label: 'Contact tags' },
           { key: 'gestures', type: 'toggle', label: 'Gesture recognition' },
           { key: 'gestureToast', type: 'toggle', label: 'Gesture announcements', showIf: 'gestures' },
           { key: 'swapHands', type: 'toggle', label: 'Swap handedness labels' },
@@ -247,8 +420,8 @@ export const SCHEMA = [
         controls: [
           { key: 'boresight', type: 'toggle', label: 'Boresight reticle', desc: 'Fixed mil-dot reticle at screen centre.' },
           { key: 'headingTape', type: 'toggle', label: 'Bearing tape', desc: 'Compass tape tracking the primary contact.' },
-          { key: 'rangeFinder', type: 'toggle', label: 'Rangefinder', desc: 'Estimated camera distance per hand.' },
-          { key: 'targetLock', type: 'toggle', label: 'Target designator', desc: 'Acquire, lock and lead line to each hand.' },
+          { key: 'rangeFinder', type: 'toggle', label: 'Rangefinder', desc: 'Estimated camera distance per contact.' },
+          { key: 'targetLock', type: 'toggle', label: 'Target designator', desc: 'Acquire, lock and lead line to each contact.' },
           { key: 'radar', type: 'toggle', label: 'Contact radar', desc: 'Plan view of tracked contacts.' },
           { key: 'tacColor', type: 'color', label: 'Tactical colour', swatches: palette },
         ],
@@ -272,10 +445,29 @@ export const SCHEMA = [
 ];
 
 export const DEFAULTS = {
+  trackingMode: 'hands',
+
   handModel: 'landmarker', delegate: 'GPU', numHands: 2,
   detectConf: 0.6, presenceConf: 0.6, trackConf: 0.55,
   smoothing: true, smoothMinCutoff: 1.4, smoothBeta: 0.04, prediction: 15, holdFrames: 4,
   renderScale: 1, resolution: '1280', targetFps: '0',
+
+  bodyPoseConf: 0.5, bodyTrackConf: 0.5,
+  bodyBones: true, bodyBoneStyle: 'neon', bodyBoneWidth: 3.5, bodyDepthWidth: true,
+  bodyJoints: true, bodyJointShape: 'ring', bodyJointSize: 4.5,
+  bodyColorMode: 'side',
+  bodyAngles: true, bodyLean: true, bodyTilt: true, bodyVelocity: false,
+  bodyTrail: false, bodyTrailLength: 26, bodyBBox: true, bodyPosture: true,
+
+  objModel: 'fp16', objScore: 0.5, objMax: 12,
+  objBoxes: true, objBoxStyle: 'bracket', objFill: false, objLabels: true, objConfidence: true,
+  objIds: true, objScan: true, objTrails: true, objTrailLength: 24, objVelocity: true,
+  objLock: true, objRadar: true, objRange: true, objHistogram: true,
+
+  faceModel: 'landmarker', faceMax: 2, faceDetectConf: 0.5,
+  faceMesh: true, faceMeshStyle: 'neon', faceContour: true, facePoints: false, facePointSize: 1.25,
+  faceIris: true, faceHead: true, faceGizmo: true, faceBlend: true, faceBlendCount: 6,
+  faceExpr: true, faceBBox: true,
 
   showBones: true, boneStyle: 'neon', boneWidth: 3, depthWidth: true, palmMesh: true,
   showJoints: true, jointShape: 'ring', jointSize: 4.5, tipHighlight: true, showIndices: false, showAngles: false,
@@ -305,12 +497,12 @@ export const PRESETS = [
   {
     id: 'tactical', name: 'Tactical', icon: 'crosshair', desc: 'Clean surgical overlay with reticles and telemetry.',
     swatch: ['#4f6b55', '#0b0f10'],
-    values: { boneStyle: 'neon', colorMode: 'accent', accent: '#9fc9a6', jointShape: 'ring', tracers: true, tracerStyle: 'ribbon', crosshairs: true, crosshairStyle: 'tactical', bbox: true, palmHud: false, lightning: false, particles: false, hull: false, hand3d: false, videoFilter: 'none', videoDim: 0.85, grid: false, scanlines: false, frameHud: true, scanSweep: false, stringWeb: false },
+    values: { boneStyle: 'neon', colorMode: 'accent', accent: '#9fc9a6', jointShape: 'ring', tracers: true, tracerStyle: 'ribbon', crosshairs: true, crosshairStyle: 'tactical', bbox: true, palmHud: false, lightning: false, particles: false, hull: false, hand3d: false, videoFilter: 'none', videoDim: 0.85, grid: false, scanlines: false, frameHud: true, scanSweep: false, stringWeb: false, bodyBoneStyle: 'neon', objBoxStyle: 'bracket', faceMeshStyle: 'neon' },
   },
   {
     id: 'hologram', name: 'Hologram', icon: 'scan', desc: 'Volumetric hologram hand over a cold, dim feed.',
     swatch: ['#4a5d7a', '#05070d'],
-    values: { boneStyle: 'pulse', colorMode: 'accent', accent: '#8fb3ff', jointShape: 'circle', tracers: true, tracerStyle: 'comet', crosshairs: false, bbox: false, palmHud: true, hand3d: true, hand3dStyle: 'hologram', hand3dTint: '#8fb3ff', hand3dGlow: true, videoFilter: 'cyan', videoDim: 0.55, scanlines: true, grid: true, scanSweep: false, lightning: false, particles: false, hull: false },
+    values: { boneStyle: 'pulse', colorMode: 'accent', accent: '#8fb3ff', jointShape: 'circle', tracers: true, tracerStyle: 'comet', crosshairs: false, bbox: false, palmHud: true, hand3d: true, hand3dStyle: 'hologram', hand3dTint: '#8fb3ff', hand3dGlow: true, videoFilter: 'cyan', videoDim: 0.55, scanlines: true, grid: true, scanSweep: false, lightning: false, particles: false, hull: false, bodyBoneStyle: 'neon', faceMeshStyle: 'thin' },
   },
   {
     id: 'cyber', name: 'Engage', icon: 'zap', desc: 'Arc discharge between contacts with lock-on targeting.',
@@ -320,12 +512,12 @@ export const PRESETS = [
   {
     id: 'xray', name: 'X-Ray', icon: 'bone', desc: 'Radiograph look with anatomical bones in 3D.',
     swatch: ['#5b6370', '#0a0d14'],
-    values: { boneStyle: 'tapered', colorMode: 'accent', accent: '#dfe9ff', jointShape: 'circle', tracers: false, crosshairs: false, bbox: false, hand3d: true, hand3dStyle: 'xray', hand3dTint: '#9cc2ff', hand3dGlow: true, videoFilter: 'invert', videoDim: 0.35, scanlines: false, grid: false, armStyle: 'bone', lightning: false, particles: false, hull: true },
+    values: { boneStyle: 'tapered', colorMode: 'accent', accent: '#dfe9ff', jointShape: 'circle', tracers: false, crosshairs: false, bbox: false, hand3d: true, hand3dStyle: 'xray', hand3dTint: '#9cc2ff', hand3dGlow: true, videoFilter: 'invert', videoDim: 0.35, scanlines: false, grid: false, armStyle: 'bone', lightning: false, particles: false, hull: true, bodyColorMode: 'depth', bodyBoneStyle: 'solid' },
   },
   {
     id: 'thermal', name: 'Thermal', icon: 'flame', desc: 'Infrared feed with depth heatmap skeleton.',
     swatch: ['#7a5a2a', '#120e0a'],
-    values: { boneStyle: 'solid', colorMode: 'depth', jointShape: 'square', tracers: true, tracerStyle: 'dots', crosshairs: true, crosshairStyle: 'circle', bbox: true, hand3d: false, videoFilter: 'thermal', videoDim: 0.9, scanlines: false, grid: true, lightning: false, particles: false, hull: false },
+    values: { boneStyle: 'solid', colorMode: 'depth', jointShape: 'square', tracers: true, tracerStyle: 'dots', crosshairs: true, crosshairStyle: 'circle', bbox: true, hand3d: false, videoFilter: 'thermal', videoDim: 0.9, scanlines: false, grid: true, lightning: false, particles: false, hull: false, bodyColorMode: 'depth' },
   },
   {
     id: 'chrome', name: 'Chrome', icon: 'gem', desc: 'Liquid-metal 3D hand with orbiting studio light.',
@@ -340,11 +532,11 @@ export const PRESETS = [
   {
     id: 'recon', name: 'Recon', icon: 'radar', desc: 'Night-vision feed, designators, rangefinder and radar.',
     swatch: ['#3e5a36', '#070a06'],
-    values: { boneStyle: 'dashed', colorMode: 'accent', accent: '#b6f0a8', jointShape: 'square', tracers: false, crosshairs: true, crosshairStyle: 'bracket', bbox: false, palmHud: false, lightning: false, particles: false, hull: false, hand3d: false, videoFilter: 'night', videoDim: 0.75, scanlines: true, grid: false, frameHud: true, boresight: true, headingTape: true, rangeFinder: true, targetLock: true, radar: true, tacColor: '#b6f0a8' },
+    values: { boneStyle: 'dashed', colorMode: 'accent', accent: '#b6f0a8', jointShape: 'square', tracers: false, crosshairs: true, crosshairStyle: 'bracket', bbox: false, palmHud: false, lightning: false, particles: false, hull: false, hand3d: false, videoFilter: 'night', videoDim: 0.75, scanlines: true, grid: false, frameHud: true, boresight: true, headingTape: true, rangeFinder: true, targetLock: true, radar: true, tacColor: '#b6f0a8', bodyBoneStyle: 'dashed', objRadar: true, objLock: true, objRange: true },
   },
   {
     id: 'minimal', name: 'Minimal', icon: 'circle-dot', desc: 'Just the skeleton. Nothing else.',
     swatch: ['#f0f0f0', '#2a2d30'],
-    values: { boneStyle: 'solid', boneWidth: 2, colorMode: 'accent', accent: '#f0f0f0', jointShape: 'circle', jointSize: 3, tracers: false, crosshairs: false, bbox: false, palmHud: false, velocity: false, pinchLine: false, lightning: false, particles: false, hull: false, hand3d: false, videoFilter: 'none', videoDim: 1, grid: false, scanlines: false, vignette: false, frameHud: false, scanSweep: false, stringWeb: false, palmMesh: false, boresight: false, headingTape: false, rangeFinder: false, targetLock: false, radar: false },
+    values: { boneStyle: 'solid', boneWidth: 2, colorMode: 'accent', accent: '#f0f0f0', jointShape: 'circle', jointSize: 3, tracers: false, crosshairs: false, bbox: false, palmHud: false, velocity: false, pinchLine: false, lightning: false, particles: false, hull: false, hand3d: false, videoFilter: 'none', videoDim: 1, grid: false, scanlines: false, vignette: false, frameHud: false, scanSweep: false, stringWeb: false, palmMesh: false, boresight: false, headingTape: false, rangeFinder: false, targetLock: false, radar: false, objScan: false, objFill: false, facePoints: false, bodyTrail: false },
   },
 ];

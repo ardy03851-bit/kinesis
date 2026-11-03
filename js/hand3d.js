@@ -266,6 +266,22 @@ export class Hand3D {
       case 'ghost':
         body = std({ color: 0xf2f5f7, emissive: T, emissiveIntensity: 0.18, roughness: 0.6, transparent: true, opacity: 0.42, depthWrite: false });
         joint = body; palm = body; break;
+      case 'carbon':
+        body = std({ color: 0x191c1f, metalness: 0.5, roughness: 0.4, envMapIntensity: 0.75 });
+        joint = std({ color: 0x2b3036, metalness: 0.62, roughness: 0.3, envMapIntensity: 0.8 });
+        palm = body; break;
+      case 'obsidian':
+        body = new THREE.MeshPhysicalMaterial({ color: 0x0b0d10, metalness: 0.1, roughness: 0.07, clearcoat: 1, clearcoatRoughness: 0.04, envMapIntensity: 1.6 });
+        joint = body; palm = body; break;
+      case 'titanium':
+        body = std({ color: 0x929aa2, metalness: 0.94, roughness: 0.3, envMapIntensity: 1.15 });
+        joint = body; palm = body; break;
+      case 'graphite':
+        body = std({ color: 0x3c4147, metalness: 0.18, roughness: 0.7, flatShading: true, envMapIntensity: 0.55 });
+        joint = body; palm = body; break;
+      case 'aerogel':
+        body = new THREE.MeshPhysicalMaterial({ color: T.clone().lerp(new THREE.Color(0xffffff), 0.65), roughness: 0.22, metalness: 0, transparent: true, opacity: 0.3, transmission: 0.55, thickness: 1.6, envMapIntensity: 1.4, depthWrite: false });
+        joint = body; palm = body; break;
       default: // mannequin
         body = std({ color: 0xd8d2c8, roughness: 0.58, metalness: 0.0, envMapIntensity: 0.6 });
         joint = body;
