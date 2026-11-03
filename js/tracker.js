@@ -42,6 +42,9 @@ export class Tracker {
     this.lastTs = -1; this.frame = 0; this.lastPose = null; this.activeDelegate = null;
   }
 
+  // True when a runner is loaded for the active mode (hands / body / objects / face).
+  get ready() { return !!(this.hand || this.pose || this.objects || this.face); }
+
   async init(cfg, log) {
     const V = await loadVision(log);
     this.close();

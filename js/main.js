@@ -140,7 +140,7 @@ let lastVideoTime = -1, lastInfer = 0;
 function ingest(res, now) {
   if (res.objects) ingestObjects(res.objects, now);
   if (res.faces) ingestFaces(res.faces, now);
-  const dets = res.hands;
+  const dets = res.hands || [];
   const used = new Set();
   // greedy match by wrist distance
   const pairs = [];
@@ -365,7 +365,7 @@ function loop() {
   const dt = Math.min(0.1, (now - lastFrame) / 1000); lastFrame = now;
   stats.frames++;
 
-  if (!paused && tracker.hand && video.readyState >= 2 && video.currentTime !== lastVideoTime) {
+  if (!paused && tracker.ready && video.readyState >= 2 && video.currentTime !== lastVideoTime) {
     const minGap = +S.targetFps ? 1000 / +S.targetFps - 2 : 0;
     if (now - lastInfer >= minGap) {
       lastVideoTime = video.currentTime; lastInfer = now;
