@@ -1,1 +1,86 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="14" fill="#07090a"/><g transform="translate(16 16)" stroke="#9fc9a6" fill="none" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M9 26V6M9 16l10-10M13 13l9 13"/></g><g fill="#9fc9a6" transform="translate(16 16)"><circle cx="9" cy="6" r="2.6"/><circle cx="19" cy="6" r="2.6"/><circle cx="22" cy="26" r="2.6"/><circle cx="9" cy="26" r="2.6"/></g></svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <radialGradient id="bg" cx="38%" cy="30%" r="85%">
+      <stop offset="0" stop-color="#101517"/>
+      <stop offset=".55" stop-color="#0a0d0f"/>
+      <stop offset="1" stop-color="#050708"/>
+    </radialGradient>
+    <linearGradient id="ln" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#c9f2d0"/>
+      <stop offset="1" stop-color="#6fb07e"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="50%" cy="50%" r="50%">
+      <stop offset="0" stop-color="#9fe8b0" stop-opacity=".9"/>
+      <stop offset=".45" stop-color="#58c473" stop-opacity=".28"/>
+      <stop offset="1" stop-color="#58c473" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <!-- background plate -->
+  <rect width="512" height="512" rx="118" fill="url(#bg)"/>
+  <rect x="8" y="8" width="496" height="496" rx="112" fill="none" stroke="#ffffff" stroke-opacity=".05" stroke-width="2"/>
+
+  <!-- tracking rings -->
+  <circle cx="256" cy="266" r="196" fill="none" stroke="#9fc9a6" stroke-opacity=".14" stroke-width="2" stroke-dasharray="4 14"/>
+  <circle cx="256" cy="266" r="158" fill="none" stroke="#9fc9a6" stroke-opacity=".2" stroke-width="2"/>
+  <circle cx="256" cy="266" r="120" fill="none" stroke="#9fc9a6" stroke-opacity=".3" stroke-width="1.5"/>
+
+  <!-- ring nodes -->
+  <circle cx="256" cy="70" r="7" fill="#9fe8b0"/>
+  <circle cx="414" cy="266" r="5" fill="#9fc9a6" fill-opacity=".8"/>
+  <circle cx="256" cy="462" r="5" fill="#9fc9a6" fill-opacity=".8"/>
+  <circle cx="98" cy="266" r="5" fill="#9fc9a6" fill-opacity=".8"/>
+
+  <!-- corner reticle brackets -->
+  <g stroke="#9fc9a6" stroke-opacity=".5" stroke-width="10" stroke-linecap="round" fill="none">
+    <path d="M96 60 v-0 a36 36 0 0 0 -36 36"/>
+    <path d="M416 60 a36 36 0 0 1 36 36"/>
+    <path d="M60 436 a36 36 0 0 0 36 36"/>
+    <path d="M452 436 a36 36 0 0 1 -36 36"/>
+  </g>
+
+  <!-- hand glow -->
+  <circle cx="266" cy="248" r="132" fill="url(#glow)"/>
+
+  <!-- hand armature: fingers as jointed struts from a palm core -->
+  <g stroke="url(#ln)" stroke-width="13" stroke-linecap="round" fill="none">
+    <!-- palm core -->
+    <path d="M232 316 v-52 a26 26 0 0 1 52 0 v20"/>
+    <!-- thumb -->
+    <path d="M232 288 l-44 -34"/>
+    <!-- index -->
+    <path d="M262 258 v-70 a14 14 0 0 1 28 0 v62"/>
+    <!-- middle -->
+    <path d="M292 266 v-84 a14 14 0 0 1 28 0 v74"/>
+    <!-- ring -->
+    <path d="M322 274 v-70 a14 14 0 0 1 28 0 v58"/>
+    <!-- pinky -->
+    <path d="M350 282 v-50 a12 12 0 0 1 24 0 v40"/>
+  </g>
+  <g stroke="#9fe8b0" stroke-width="6" stroke-linecap="round" fill="none" stroke-opacity=".85">
+    <path d="M262 258 v-70 a14 14 0 0 1 28 0"/>
+    <path d="M292 266 v-84 a14 14 0 0 1 28 0"/>
+    <path d="M322 274 v-70 a14 14 0 0 1 28 0"/>
+  </g>
+
+  <!-- joints -->
+  <g fill="#d9ffe0">
+    <circle cx="232" cy="264" r="11"/>
+    <circle cx="266" cy="190" r="10"/>
+    <circle cx="276" cy="258" r="9"/>
+    <circle cx="306" cy="182" r="10"/>
+    <circle cx="320" cy="266" r="9"/>
+    <circle cx="336" cy="204" r="10"/>
+    <circle cx="350" cy="274" r="9"/>
+    <circle cx="362" cy="232" r="9"/>
+    <circle cx="188" cy="254" r="9"/>
+    <circle cx="232" cy="316" r="10"/>
+  </g>
+
+  <!-- scan line -->
+  <g stroke="#c9f2d0" stroke-opacity=".55" stroke-width="4">
+    <line x1="120" y1="404" x2="392" y2="404"/>
+  </g>
+  <line x1="392" y1="404" x2="440" y2="404" stroke="#9fe8b0" stroke-width="4" stroke-linecap="round"/>
+  <circle cx="440" cy="404" r="9" fill="#9fe8b0"/>
+</svg>

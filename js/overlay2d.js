@@ -135,7 +135,7 @@ export class Overlay2D {
         if (d % 10 === 0) { const v = ((d % 360) + 360) % 360; const lab = { 0: 'N', 90: 'E', 180: 'S', 270: 'W' }[v] ?? String(v).padStart(3, '0'); ctx.fillText(lab, x, y - 6); }
       }
       ctx.beginPath(); ctx.moveTo(cx, y + 13); ctx.lineTo(cx - 5, y + 20); ctx.lineTo(cx + 5, y + 20); ctx.closePath(); ctx.fill();
-      ctx.fillStyle = 'rgba(5,7,8,.85)'; ctx.fillRect(cx - 22, y + 22, 44, 15); ctx.strokeRect(cx - 22, y + 22, 44, 15);
+      this.rrect(cx - 22, y + 22, 44, 15, 7); ctx.fillStyle = 'rgba(5,7,8,.85)'; ctx.fill(); ctx.strokeStyle = 'rgba(255,255,255,.25)'; ctx.stroke();
       ctx.fillStyle = col; ctx.fillText(String(Math.round(brg) % 360).padStart(3, '0'), cx, y + 30);
     }
     scene.hands.forEach((hand, idx) => {
@@ -157,7 +157,7 @@ export class Overlay2D {
         const bw = Math.max(...lines.map(([s]) => ctx.measureText(s).width)) + 14, bh = lines.length * 13 + 6;
         let tx = c.x - bw / 2, ty = y0 - 14 * hand.scale - 34 - bh; if (ty < 130) { let y1 = -Infinity; for (const p of hand.pts) y1 = Math.max(y1, p.y); ty = y1 + 20; }
         tx = clamp(tx, 8, w - bw - 8);
-        ctx.fillStyle = 'rgba(5,7,8,.78)'; ctx.fillRect(tx, ty, bw, bh); ctx.fillStyle = lc; ctx.fillRect(tx, ty, 2, bh);
+        this.rrect(tx, ty, bw, bh, 6); ctx.fillStyle = 'rgba(5,7,8,.78)'; ctx.fill(); this.rrect(tx, ty, 2.5, bh, 1.25); ctx.fillStyle = lc; ctx.fill();
         ctx.textAlign = 'left'; lines.forEach(([s2, cc], j) => { ctx.fillStyle = cc; ctx.fillText(s2, tx + 8, ty + 10 + j * 13); });
       } else if (S.rangeFinder) {
         ctx.textAlign = 'center'; ctx.fillStyle = col; ctx.fillText(`RNG ${rng.toFixed(0)} CM`, c.x, c.y + 70 * hand.scale);
@@ -324,7 +324,7 @@ export class Overlay2D {
     ctx.font = `500 10px ${MONO}`; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
     hand.pts.forEach((p, i) => {
       const s = String(i); const w = ctx.measureText(s).width + 6;
-      ctx.fillStyle = 'rgba(6,9,10,0.78)'; ctx.fillRect(p.x + 7, p.y - 7, w, 13);
+      this.rrect(p.x + 7, p.y - 7, w, 13, 6.5); ctx.fillStyle = 'rgba(6,9,10,0.78)'; ctx.fill();
       ctx.fillStyle = '#e8edf2'; ctx.fillText(s, p.x + 10, p.y);
     });
   }
@@ -337,7 +337,7 @@ export class Overlay2D {
     for (const [a, b, c] of joints) {
       const ang = Math.round(180 - jointAngle(src[a], src[b], src[c]));
       const p = P[b];
-      ctx.fillStyle = 'rgba(6,9,10,0.8)'; ctx.fillRect(p.x - 15, p.y - 22, 30, 13);
+      this.rrect(p.x - 15, p.y - 22, 30, 13, 6.5); ctx.fillStyle = 'rgba(6,9,10,0.8)'; ctx.fill();
       ctx.fillStyle = S.secondary; ctx.fillText(ang + '°', p.x, p.y - 15.5);
     }
   }
@@ -426,8 +426,8 @@ export class Overlay2D {
         const lines = [`X ${n.x.toFixed(3)}`, `Y ${n.y.toFixed(3)}`, `Z ${n.z >= 0 ? '+' : ''}${n.z.toFixed(3)}`];
         ctx.font = `500 10px ${MONO}`; ctx.textAlign = 'left'; ctx.textBaseline = 'top';
         const bx = R + 10, by = -R - 4;
-        ctx.fillStyle = 'rgba(6,9,10,0.72)'; ctx.fillRect(bx - 4, by - 3, 74, 42);
-        ctx.fillStyle = col; ctx.fillRect(bx - 4, by - 3, 2, 42);
+        this.rrect(bx - 4, by - 3, 74, 42, 8); ctx.fillStyle = 'rgba(6,9,10,0.72)'; ctx.fill();
+        this.rrect(bx - 4, by - 3, 2.5, 42, 1.25); ctx.fillStyle = col; ctx.fill();
         ctx.fillStyle = '#e8edf2';
         lines.forEach((l, i) => ctx.fillText(l, bx + 2, by + i * 13));
       }
@@ -465,10 +465,10 @@ export class Overlay2D {
       const w1 = ctx.measureText(label).width + 14;
       const w2 = gesture ? ctx.measureText(gesture).width + 14 : 0;
       const ty = y0 - 22;
-      ctx.fillStyle = col; ctx.fillRect(x0, ty, w1, 17);
+      this.rrect(x0, ty, w1, 17, 8.5); ctx.fillStyle = col; ctx.fill();
       ctx.fillStyle = '#071012'; ctx.fillText(label, x0 + 7, ty + 9);
       if (gesture) {
-        ctx.fillStyle = 'rgba(6,9,10,0.82)'; ctx.fillRect(x0 + w1, ty, w2, 17);
+        this.rrect(x0 + w1, ty, w2, 17, 8.5); ctx.fillStyle = 'rgba(6,9,10,0.82)'; ctx.fill();
         ctx.fillStyle = col; ctx.fillText(gesture, x0 + w1 + 7, ty + 9);
       }
     }
@@ -531,7 +531,7 @@ export class Overlay2D {
     const label = mm != null ? `${mm.toFixed(0)} mm` : `${(pd * 100).toFixed(0)}%`;
     ctx.font = `600 10px ${MONO}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     const w = ctx.measureText(label).width + 10;
-    ctx.fillStyle = 'rgba(6,9,10,0.8)'; ctx.fillRect(mx - w / 2, my - 8, w, 16);
+    this.rrect(mx - w / 2, my - 8, w, 16, 8); ctx.fillStyle = 'rgba(6,9,10,0.8)'; ctx.fill();
     ctx.fillStyle = col; ctx.fillText(label, mx, my);
     if (hand.pinchStart) this.ripples.push({ x: mx, y: my, t0: t, col: S.secondary });
   }
@@ -630,7 +630,7 @@ export class Overlay2D {
       ctx.font = `600 11px ${MONO}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       const label = `${Math.round(ang)}°`;
       const tw = ctx.measureText(label).width + 10;
-      ctx.fillStyle = 'rgba(6,9,10,0.8)'; ctx.fillRect(lx - tw / 2, ly - 8, tw, 16);
+      this.rrect(lx - tw / 2, ly - 8, tw, 16, 8); ctx.fillStyle = 'rgba(6,9,10,0.8)'; ctx.fill();
       ctx.fillStyle = col; ctx.fillText(label, lx, ly);
     }
   }
@@ -785,7 +785,7 @@ export class Overlay2D {
       ctx.font = `600 10.5px ${MONO}`; ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
       const label = `BODY-01 · TRACKING`;
       const tw = ctx.measureText(label).width + 14;
-      ctx.fillStyle = col; ctx.fillRect(x0, y0 - 21, tw, 17);
+      this.rrect(x0, y0 - 21, tw, 17, 8.5); ctx.fillStyle = col; ctx.fill();
       ctx.fillStyle = '#071012'; ctx.fillText(label, x0 + 7, y0 - 12.5);
     }
 
@@ -802,21 +802,38 @@ export class Overlay2D {
     }
   }
 
+  // Rounded-rect path with graceful fallback
+  rrect(x, y, w, h, r) {
+    const { ctx } = this;
+    const rr = Math.min(r, w / 2, h / 2);
+    ctx.beginPath();
+    if (ctx.roundRect) ctx.roundRect(x, y, w, h, rr);
+    else {
+      ctx.moveTo(x + rr, y);
+      ctx.arcTo(x + w, y, x + w, y + h, rr);
+      ctx.arcTo(x + w, y + h, x, y + h, rr);
+      ctx.arcTo(x, y + h, x, y, rr);
+      ctx.arcTo(x, y, x + w, y, rr);
+      ctx.closePath();
+    }
+  }
+
   // Small HUD readout chip
   readout(S, x, y, text, col) {
     const { ctx } = this;
     ctx.font = `600 10px ${MONO}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     const w = ctx.measureText(text).width + 10;
-    ctx.fillStyle = 'rgba(6,9,10,0.78)'; ctx.fillRect(x - w / 2, y - 8, w, 15);
+    this.rrect(x - w / 2, y - 8, w, 15, 7.5); ctx.fillStyle = 'rgba(6,9,10,0.78)'; ctx.fill();
+    ctx.strokeStyle = rgba(col, 0.3); ctx.lineWidth = 1; ctx.stroke();
     ctx.fillStyle = col; ctx.fillText(text, x, y);
   }
 
   // Labelled HUD panel
   panel(S, x, y, w, h, title, rows, col) {
     const { ctx } = this;
-    ctx.fillStyle = 'rgba(5,7,8,.78)'; ctx.fillRect(x, y, w, h);
-    ctx.fillStyle = col; ctx.fillRect(x, y, 2, h);
-    ctx.strokeStyle = rgba(col, 0.4); ctx.lineWidth = 1; ctx.strokeRect(x, y, w, h);
+    this.rrect(x, y, w, h, 10); ctx.fillStyle = 'rgba(5,7,8,.78)'; ctx.fill();
+    ctx.strokeStyle = rgba(col, 0.4); ctx.lineWidth = 1; ctx.stroke();
+    this.rrect(x + 5, y + 5, 2.5, h - 10, 1.25); ctx.fillStyle = col; ctx.fill();
     ctx.font = `600 9.5px ${MONO}`; ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
     ctx.fillStyle = rgba(col, 0.9); ctx.fillText(title, x + 8, y + 11);
     rows.forEach(([k, v], i) => {
@@ -871,13 +888,13 @@ export class Overlay2D {
         const bw = Math.max(...head.map(([s]) => ctx.measureText(s).width)) + 16;
         const bh = head.length * 15 + 8;
         const by = Math.max(r.y - bh - 4, 8);
-        ctx.fillStyle = 'rgba(5,7,8,.82)'; ctx.fillRect(r.x, by, bw, bh);
-        ctx.fillStyle = c; ctx.fillRect(r.x, by, 2, bh);
+        this.rrect(r.x, by, bw, bh, 6); ctx.fillStyle = 'rgba(5,7,8,.82)'; ctx.fill();
+        this.rrect(r.x, by, 2.5, bh, 1.25); ctx.fillStyle = c; ctx.fill();
         head.forEach(([s, cc], i) => { ctx.fillStyle = cc; ctx.fillText(s, r.x + 8, by + 11 + i * 15); });
         if (S.objConfidence) {
           const bwid = 54;
-          ctx.fillStyle = 'rgba(255,255,255,.12)'; ctx.fillRect(r.x, by + bh + 4, bwid, 3);
-          ctx.fillStyle = c; ctx.fillRect(r.x, by + bh + 4, bwid * clamp(o.score, 0, 1), 3);
+          this.rrect(r.x, by + bh + 4, bwid, 3, 1.5); ctx.fillStyle = 'rgba(255,255,255,.12)'; ctx.fill();
+          this.rrect(r.x, by + bh + 4, bwid * clamp(o.score, 0, 1), 3, 1.5); ctx.fillStyle = c; ctx.fill();
         }
       }
       if (S.objRange) {
@@ -1016,7 +1033,7 @@ export class Overlay2D {
         ctx.font = `600 10.5px ${MONO}`; ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
         const label = 'FACE-01 · LOCK';
         const tw = ctx.measureText(label).width + 14;
-        ctx.fillStyle = col; ctx.fillRect(x0, y0 - 21, tw, 17);
+        this.rrect(x0, y0 - 21, tw, 17, 8.5); ctx.fillStyle = col; ctx.fill();
         ctx.fillStyle = '#071012'; ctx.fillText(label, x0 + 7, y0 - 12.5);
       }
       if (S.faceHead && face.matrix) {
@@ -1050,15 +1067,15 @@ export class Overlay2D {
       const cats = face.blend.filter((c) => c.categoryName !== '_neutral').sort((a, b) => b.score - a.score).slice(0, S.faceBlendCount);
       const bw = 250, bh = cats.length * 16 + 30;
       const bx = w / 2 - bw / 2, by = h - 170 - bh;
-      ctx.fillStyle = 'rgba(5,7,8,.8)'; ctx.fillRect(bx, by, bw, bh);
-      ctx.strokeStyle = rgba(S.accent, 0.35); ctx.lineWidth = 1; ctx.strokeRect(bx, by, bw, bh);
+      this.rrect(bx, by, bw, bh, 10); ctx.fillStyle = 'rgba(5,7,8,.8)'; ctx.fill();
+      ctx.strokeStyle = rgba(S.accent, 0.35); ctx.lineWidth = 1; ctx.stroke();
       ctx.font = `600 9.5px ${MONO}`; ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
       ctx.fillStyle = rgba(S.accent, 0.9); ctx.fillText('BLENDSHAPE TELEMETRY', bx + 10, by + 12);
       cats.forEach((c, i) => {
         const yy = by + 30 + i * 16;
         ctx.fillStyle = 'rgba(232,237,242,.75)'; ctx.fillText(c.categoryName.toUpperCase(), bx + 10, yy);
-        ctx.fillStyle = 'rgba(255,255,255,.1)'; ctx.fillRect(bx + 140, yy - 3, 96, 6);
-        ctx.fillStyle = S.accent; ctx.fillRect(bx + 140, yy - 3, 96 * clamp(c.score, 0, 1), 6);
+        this.rrect(bx + 140, yy - 3, 96, 6, 3); ctx.fillStyle = 'rgba(255,255,255,.1)'; ctx.fill();
+        this.rrect(bx + 140, yy - 3, 96 * clamp(c.score, 0, 1), 6, 3); ctx.fillStyle = S.accent; ctx.fill();
         ctx.fillStyle = '#e8edf2'; ctx.textAlign = 'right'; ctx.fillText(Math.round(c.score * 100) + '%', bx + bw - 10, yy); ctx.textAlign = 'left';
       });
       if (S.faceExpr && cats.length) {
@@ -1109,7 +1126,7 @@ export class Overlay2D {
       p.x += p.vx * dt; p.y += p.vy * dt;
       const k = 1 - p.life / p.max;
       ctx.fillStyle = rgba(p.col, k);
-      ctx.fillRect(p.x - p.s / 2, p.y - p.s / 2, p.s, p.s);
+      this.rrect(p.x - p.s / 2, p.y - p.s / 2, p.s, p.s, p.s * 0.3); ctx.fill();
       out.push(p);
     }
     this.particles = out;

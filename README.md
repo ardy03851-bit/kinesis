@@ -22,6 +22,8 @@ What Kinesis tracks is switchable at any time (Tracking › What to track, or ke
 - Tactical layer: boresight reticle, bearing tape, rangefinder, target designator with lock-on and AZ/EL readout, contact radar
 - Scene: video filters (thermal, noir, invert, cyan, mono, night), dim, grid, scanlines, vignette, frame HUD
 - 9 presets, searchable settings panel, export / import / share-link of settings
+- Soft-machine UI: capsule controls, rounded glass panels and rounded on-canvas HUD chips and panels — no hard squares
+- Installable PWA with a proper home-screen icon set (SVG + 192/512 PNG + maskable, full-bleed apple-touch-icon)
 - Photo capture and video recording, fullscreen, wake lock, offline cache, installable PWA
 
 ## Using on iPad
