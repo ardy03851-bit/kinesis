@@ -17,6 +17,11 @@ const MODELS = {
     int8: 'https://storage.googleapis.com/mediapipe-tasks/object_detector/efficientdet_lite0_uint8.tflite',
     fp16: 'https://storage.googleapis.com/mediapipe-tasks/object_detector/efficientdet_lite0_fp16.tflite',
     fp32: 'https://storage.googleapis.com/mediapipe-tasks/object_detector/efficientdet_lite0_fp32.tflite',
+    lite2int8: 'https://storage.googleapis.com/mediapipe-tasks/object_detector/efficientdet_lite2_uint8.tflite',
+    lite2fp16: 'https://storage.googleapis.com/mediapipe-tasks/object_detector/efficientdet_lite2_fp16.tflite',
+    lite2fp32: 'https://storage.googleapis.com/mediapipe-tasks/object_detector/efficientdet_lite2_fp32.tflite',
+    ssdInt8: 'https://storage.googleapis.com/mediapipe-tasks/object_detector/mobilenetv2_ssd_256_uint8.tflite',
+    ssdFp32: 'https://storage.googleapis.com/mediapipe-tasks/object_detector/mobilenetv2_ssd_256_fp32.tflite',
   },
 };
 

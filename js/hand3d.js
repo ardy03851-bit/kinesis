@@ -28,6 +28,55 @@ const fresnelFS = /* glsl */`
     gl_FragColor = vec4(uColor * (0.6 + i), clamp(i, 0.0, 1.0) * uOpacity);
   }`;
 
+// Procedural walnut: growth rings, grain streaks and knots rendered to canvas.
+function woodTexture() {
+  const S = 512;
+  const c = document.createElement('canvas'); c.width = c.height = S;
+  const g = c.getContext('2d');
+  // warm walnut base
+  const base = g.createLinearGradient(0, 0, S, S);
+  base.addColorStop(0, '#7a5433'); base.addColorStop(0.5, '#6b4629'); base.addColorStop(1, '#5d3c22');
+  g.fillStyle = base; g.fillRect(0, 0, S, S);
+  // growth rings — off-centre ellipses with wavering width
+  const cx = S * 0.78, cy = S * 0.22;
+  for (let r = 900; r > 8; r -= 9) {
+    const w = 0.75 + 0.25 * Math.sin(r * 0.013);
+    const l = Math.floor(96 + w * 44);
+    g.strokeStyle = `rgba(${Math.floor(l * 1.05)}, ${Math.floor(l * 0.72)}, ${Math.floor(l * 0.45)}, 0.5)`;
+    g.lineWidth = 2.4 + Math.sin(r * 0.07) * 1.6;
+    g.beginPath();
+    g.ellipse(cx, cy, r, r * 0.62, -0.6, 0, Math.PI * 2);
+    g.stroke();
+  }
+  // fine grain streaks — long wavy lines
+  for (let i = 0; i < 130; i++) {
+    const x0 = Math.random() * S;
+    g.strokeStyle = Math.random() < 0.5 ? 'rgba(30,18,8,0.10)' : 'rgba(190,150,105,0.07)';
+    g.lineWidth = 0.5 + Math.random() * 0.9;
+    g.beginPath();
+    for (let y = 0; y <= S; y += 14) {
+      const x = x0 + Math.sin(y * 0.018 + i * 1.7) * 7 + Math.sin(y * 0.0011 + i) * 12;
+      y === 0 ? g.moveTo(x, y) : g.lineTo(x, y);
+    }
+    g.stroke();
+  }
+  // knots — dark radial cores with concentric stress rings
+  for (const [kx, ky] of [[S * 0.22, S * 0.68], [S * 0.62, S * 0.85]]) {
+    const kr = 26 + Math.random() * 14;
+    const kg = g.createRadialGradient(kx, ky, 2, kx, ky, kr * 2.6);
+    kg.addColorStop(0, 'rgba(28,16,7,0.85)');
+    kg.addColorStop(0.35, 'rgba(48,28,13,0.45)');
+    kg.addColorStop(1, 'rgba(48,28,13,0)');
+    g.fillStyle = kg;
+    g.beginPath(); g.arc(kx, ky, kr * 2.6, 0, Math.PI * 2); g.fill();
+    g.strokeStyle = 'rgba(24,14,6,0.5)'; g.lineWidth = 1.4;
+    for (let r = kr * 0.4; r < kr * 1.8; r += 4.5) {
+      g.beginPath(); g.ellipse(kx, ky, r, r * 0.72, 0.3, 0, Math.PI * 2); g.stroke();
+    }
+  }
+  return c;
+}
+
 function fresnelMat(color, { power = 2.2, base = 0.1, opacity = 1, scan = 0, side = THREE.FrontSide } = {}) {
   return new THREE.ShaderMaterial({
     uniforms: {
@@ -292,6 +341,22 @@ export class Hand3D {
         body = new THREE.MeshStandardMaterial({ color: 0x07080a, roughness: 0.42, metalness: 0.85, envMapIntensity: 1.2 });
         joint = new THREE.MeshStandardMaterial({ color: 0x07080a, roughness: 0.28, metalness: 0.95, emissive: T.clone().multiplyScalar(0.12), envMapIntensity: 1.6 });
         palm = body; break;
+      case 'wood': {
+        // Carved walnut: procedural growth rings, grain and knots with a lacquered coat.
+        const canvas = woodTexture();
+        const map = new THREE.CanvasTexture(canvas);
+        map.wrapS = map.wrapT = THREE.RepeatWrapping;
+        const bump = new THREE.CanvasTexture(canvas);
+        bump.wrapS = bump.wrapT = THREE.RepeatWrapping;
+        body = new THREE.MeshPhysicalMaterial({
+          color: T.clone().lerp(new THREE.Color(0xffffff), 0.72),
+          map, bumpMap: bump, bumpScale: 1.4,
+          roughness: 0.62, metalness: 0,
+          clearcoat: 0.5, clearcoatRoughness: 0.38,
+          envMapIntensity: 0.85,
+        });
+        joint = body; palm = body; break;
+      }
       default: // mannequin
         body = std({ color: 0xd8d2c8, roughness: 0.58, metalness: 0.0, envMapIntensity: 0.6 });
         joint = body;

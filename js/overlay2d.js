@@ -1163,6 +1163,8 @@ export class Overlay2D {
   // Two counter-rotating turbine meshes suspended in the palm.
   drawFans(S, hand, t) {
     const { ctx } = this;
+    // prune velocity memory of hands no longer tracked
+    if (this.fanPrev?.size > 8) for (const [k, v] of this.fanPrev) if (t - v.t > 2000) this.fanPrev.delete(k);
     const palm = hand.pts[9];
     const R = Math.max(22, (hand.palmPx || 70) * 0.5 * S.fanSize);
     const TAU = Math.PI * 2;
