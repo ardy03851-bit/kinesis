@@ -26,10 +26,7 @@ export class Overlay2D {
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d', { alpha: true, desynchronized: true });
     this.trails = new Map(); // key handId:tip -> [{x,y,t}]
-    this.particles = [];
     this.ripples = [];
-    this.strokes = []; // air paint: {pts:[{x,y,t}], color, handId, done}
-    this.activeStroke = new Map();
     this.w = 1; this.h = 1; this.dpr = 1;
   }
 
@@ -40,13 +37,12 @@ export class Overlay2D {
     this.trails.clear();
   }
 
-  clearPaint() { this.strokes = []; this.activeStroke.clear(); }
-
   colorFor(S, i, hand, t) {
     switch (S.colorMode) {
       case 'finger': { const f = LANDMARK_FINGER[i]; return f < 0 ? '#e8edf2' : FINGER_COLORS[f]; }
       case 'depth': { const z = hand.norm[i].z; return depthColor(0.5 - z * 5); }
-      case 'rainbow': { const f = Math.max(0, LANDMARK_FINGER[i]); return `hsl(${(t * 0.06 + f * 46 + i * 4) % 360},90%,64%)`; }
+      case 'velocity': { const p = hand.norm[i]; const v = Math.hypot(p.vx || 0, p.vy || 0); return mixHex(S.accent, S.secondary, clamp(v * 1.6, 0, 1)); }
+      case 'confidence': { return mixHex('#5b646b', S.accent, clamp(hand.score ?? 0.5, 0, 1)); }
       case 'hand': return hand.slot % 2 ? S.secondary : S.accent;
       default: return S.accent;
     }
@@ -62,17 +58,11 @@ export class Overlay2D {
     ctx.globalAlpha = S.opacity;
     ctx.lineCap = 'round'; ctx.lineJoin = 'round';
 
-    if (S.airPaint) this.updatePaint(S, scene); else if (this.activeStroke.size) this.activeStroke.clear();
-    if (S.airPaint || this.strokes.length) this.drawPaint(S, scene);
-
     for (const arm of scene.arms) this.drawArm(S, arm, scene);
     if (S.armTracking && S.shoulders && scene.shoulders) this.drawShoulders(S, scene);
 
-    if (S.stringWeb && scene.hands.length >= 2) this.drawWeb(S, scene.hands[0], scene.hands[1], t);
-
     for (const hand of scene.hands) {
       if (S.hull) this.drawHull(S, hand);
-      if (S.fanMesh) this.drawFans(S, hand, t);
       if (S.palmMesh) this.drawPalm(S, hand, t);
       if (S.tracers) this.updateAndDrawTrails(S, hand, t);
       if (S.showBones) this.drawBones(S, hand, t);
@@ -82,19 +72,15 @@ export class Overlay2D {
       if (S.palmHud) this.drawPalmHud(S, hand, t);
       if (S.velocity) this.drawVelocity(S, hand);
       if (S.pinchLine) this.drawPinch(S, hand, t);
-      if (S.lightning && hand.analysis.pinching) this.drawLightning(S, hand.pts[4], hand.pts[8], S.accent, 2);
       if (S.crosshairs) this.drawCrosshairs(S, hand, t);
       if (S.bbox || S.handLabels) this.drawFrame(S, hand, t);
-      if (S.particles) this.emit(S, hand, scene.dt);
     }
     this.drawTactical(S, scene, t);
     if (S.trackingMode === 'body' && scene.body) this.drawBody(S, scene, t);
     if (S.trackingMode === 'objects') this.drawObjects(S, scene, t);
     if (S.trackingMode === 'face') this.drawFace(S, scene, t);
-    if (S.lightning && scene.hands.length >= 2) this.drawLightning(S, scene.hands[0].pts[8], scene.hands[1].pts[8], S.secondary, 3);
     if (!S.tracers && this.trails.size) this.trails.clear();
     this.prune(scene);
-    this.drawParticles(S, scene.dt);
     this.drawRipples(t);
     ctx.globalAlpha = 1;
   }
@@ -117,11 +103,27 @@ export class Overlay2D {
     ctx.save(); ctx.font = `600 10px ${MONO}`; ctx.textBaseline = 'middle';
     if (S.boresight) {
       ctx.strokeStyle = rgba(col, 0.75); ctx.fillStyle = rgba(col, 0.75); ctx.lineWidth = 1;
-      const g = 16, L = 70; ctx.beginPath();
-      ctx.moveTo(cx - L, cy); ctx.lineTo(cx - g, cy); ctx.moveTo(cx + g, cy); ctx.lineTo(cx + L, cy);
-      ctx.moveTo(cx, cy + g); ctx.lineTo(cx, cy + L); ctx.moveTo(cx, cy - g); ctx.lineTo(cx, cy - L * 0.5); ctx.stroke();
-      for (let k = 1; k <= 4; k++) { const d = g + k * ((L - g) / 4); for (const [dx, dy] of [[d, 0], [-d, 0], [0, d]]) { ctx.beginPath(); ctx.arc(cx + dx, cy + dy, 1.4, 0, 7); ctx.fill(); } }
-      ctx.beginPath(); ctx.arc(cx, cy, 1.2, 0, 7); ctx.fill();
+      const L = S.boresightSize || 70;
+      if (S.boresightStyle === 'cross') {
+        ctx.beginPath();
+        ctx.moveTo(cx - L, cy); ctx.lineTo(cx + L, cy);
+        ctx.moveTo(cx, cy - L); ctx.lineTo(cx, cy + L); ctx.stroke();
+        ctx.beginPath(); ctx.arc(cx, cy, 2, 0, 7); ctx.fill();
+      } else if (S.boresightStyle === 'ring') {
+        ctx.beginPath(); ctx.arc(cx, cy, L * 0.6, 0, 7); ctx.stroke();
+        ctx.setLineDash([2, 4]); ctx.beginPath(); ctx.arc(cx, cy, L, 0, 7); ctx.stroke(); ctx.setLineDash([]);
+        ctx.beginPath();
+        ctx.moveTo(cx - L * 0.6 - 8, cy); ctx.lineTo(cx - L * 0.6 + 8, cy);
+        ctx.moveTo(cx + L * 0.6 - 8, cy); ctx.lineTo(cx + L * 0.6 + 8, cy);
+        ctx.moveTo(cx, cy - L * 0.6 - 8); ctx.lineTo(cx, cy - L * 0.6 + 8);
+        ctx.moveTo(cx, cy + L * 0.6 - 8); ctx.lineTo(cx, cy + L * 0.6 + 8); ctx.stroke();
+      } else {
+        const g = L * 0.23; ctx.beginPath();
+        ctx.moveTo(cx - L, cy); ctx.lineTo(cx - g, cy); ctx.moveTo(cx + g, cy); ctx.lineTo(cx + L, cy);
+        ctx.moveTo(cx, cy + g); ctx.lineTo(cx, cy + L); ctx.moveTo(cx, cy - g); ctx.lineTo(cx, cy - L * 0.5); ctx.stroke();
+        for (let k = 1; k <= 4; k++) { const d = g + k * ((L - g) / 4); for (const [dx, dy] of [[d, 0], [-d, 0], [0, d]]) { ctx.beginPath(); ctx.arc(cx + dx, cy + dy, 1.4, 0, 7); ctx.fill(); } }
+        ctx.beginPath(); ctx.arc(cx, cy, 1.2, 0, 7); ctx.fill();
+      }
     }
     if (S.headingTape) {
       const prim = scene.hands[0]; const hdg = prim ? ((this.handCenter(prim).x / w) - 0.5) * 60 : 0;
@@ -165,14 +167,16 @@ export class Overlay2D {
       }
     });
     if (S.radar && S.trackingMode === 'hands') {
-      const R = Math.min(64, w * 0.12), rx = w - R - 28, ry = h - R - 160;
+      const R = Math.min(S.radarSize || 64, w * 0.22), rx = w - R - 28, ry = h - R - 160;
       ctx.fillStyle = 'rgba(5,7,8,.6)'; ctx.beginPath(); ctx.arc(rx, ry, R, 0, 7); ctx.fill();
       ctx.strokeStyle = rgba(col, 0.5); ctx.lineWidth = 1;
-      for (const f of [1, 0.66, 0.33]) { ctx.beginPath(); ctx.arc(rx, ry, R * f, 0, 7); ctx.stroke(); }
+      if (S.radarRings !== false) for (const f of [1, 0.66, 0.33]) { ctx.beginPath(); ctx.arc(rx, ry, R * f, 0, 7); ctx.stroke(); }
       ctx.beginPath(); ctx.moveTo(rx - R, ry); ctx.lineTo(rx + R, ry); ctx.moveTo(rx, ry - R); ctx.lineTo(rx, ry + R); ctx.stroke();
-      const a = (t * 0.0022) % (Math.PI * 2);
-      const gr = ctx.createConicGradient ? ctx.createConicGradient(a - 0.9, rx, ry) : null;
-      if (gr) { gr.addColorStop(0, 'rgba(0,0,0,0)'); gr.addColorStop(0.14, rgba(col, 0.28)); gr.addColorStop(0.1433, 'rgba(0,0,0,0)'); gr.addColorStop(1, 'rgba(0,0,0,0)'); ctx.fillStyle = gr; ctx.beginPath(); ctx.arc(rx, ry, R, 0, 7); ctx.fill(); }
+      if (S.radarSweep !== false) {
+        const a = (t * 0.0022) % (Math.PI * 2);
+        const gr = ctx.createConicGradient ? ctx.createConicGradient(a - 0.9, rx, ry) : null;
+        if (gr) { gr.addColorStop(0, 'rgba(0,0,0,0)'); gr.addColorStop(0.14, rgba(col, 0.28)); gr.addColorStop(0.1433, 'rgba(0,0,0,0)'); gr.addColorStop(1, 'rgba(0,0,0,0)'); ctx.fillStyle = gr; ctx.beginPath(); ctx.arc(rx, ry, R, 0, 7); ctx.fill(); }
+      }
       for (const hand of scene.hands) {
         const c = this.handCenter(hand); const rng = this.rangeCm(hand);
         const bx = rx + ((c.x / w) - 0.5) * 2 * R * 0.85, by = ry + R - clamp(rng / 150, 0, 1) * 2 * R * 0.9;
@@ -354,11 +358,11 @@ export class Overlay2D {
       arr.push({ x: p.x, y: p.y, t });
       while (arr.length > S.tracerLength) arr.shift();
       if (arr.length < 2) continue;
-      const col = S.colorMode === 'finger' ? FINGER_COLORS[TIPS.indexOf(tip)] : S.colorMode === 'rainbow' ? null : (hand.slot % 2 && S.colorMode === 'hand' ? S.secondary : S.accent);
+      const col = S.colorMode === 'finger' ? FINGER_COLORS[TIPS.indexOf(tip)] : (hand.slot % 2 && S.colorMode === 'hand' ? S.secondary : S.accent);
       const n = arr.length;
       if (S.tracerStyle === 'dots') {
         for (let i = 0; i < n; i += 2) {
-          const k2 = i / n; const c = col || `hsl(${(t * 0.06 + i * 8) % 360},90%,64%)`;
+          const k2 = i / n; const c = col;
           ctx.fillStyle = rgba(toHex(c), k2 * 0.9);
           ctx.beginPath(); ctx.arc(arr[i].x, arr[i].y, S.tracerWidth * 0.45 * (0.4 + k2), 0, 7); ctx.fill();
         }
@@ -367,10 +371,8 @@ export class Overlay2D {
       ctx.globalCompositeOperation = S.tracerStyle === 'comet' ? 'lighter' : 'source-over';
       for (let i = 1; i < n; i++) {
         const k2 = i / n;
-        const c = col || `hsl(${(t * 0.06 + i * 8) % 360},90%,64%)`;
-        let w = S.tracerStyle === 'line' ? 1.2 : S.tracerWidth * (S.tracerStyle === 'comet' ? k2 * k2 * 1.6 : k2);
-        ctx.strokeStyle = rgba(toHex(c), S.tracerStyle === 'line' ? k2 * 0.9 : k2 * 0.85);
-        ctx.lineWidth = Math.max(0.5, w);
+        ctx.strokeStyle = rgba(toHex(col), S.tracerStyle === 'line' ? k2 * 0.9 : k2 * 0.85);
+        ctx.lineWidth = Math.max(0.5, S.tracerStyle === 'line' ? 1.2 : S.tracerWidth * (S.tracerStyle === 'comet' ? k2 * k2 * 1.6 : k2));
         ctx.beginPath(); ctx.moveTo(arr[i - 1].x, arr[i - 1].y); ctx.lineTo(arr[i].x, arr[i].y); ctx.stroke();
       }
       ctx.globalCompositeOperation = 'source-over';
@@ -537,53 +539,6 @@ export class Overlay2D {
     if (hand.pinchStart) this.ripples.push({ x: mx, y: my, t0: t, col: S.secondary });
   }
 
-  drawLightning(S, a, b, col, strands) {
-    const { ctx } = this;
-    const L = Math.hypot(b.x - a.x, b.y - a.y);
-    if (L < 4) return;
-    ctx.globalCompositeOperation = 'lighter';
-    for (let s = 0; s < strands; s++) {
-      let pts = [a, b];
-      let disp = L * 0.18;
-      for (let it = 0; it < 5; it++) {
-        const np = [pts[0]];
-        for (let i = 1; i < pts.length; i++) {
-          const p = pts[i - 1], q = pts[i];
-          const nx = -(q.y - p.y), ny = q.x - p.x, nl = Math.hypot(nx, ny) || 1;
-          const off = (Math.random() - 0.5) * disp;
-          np.push({ x: (p.x + q.x) / 2 + nx / nl * off, y: (p.y + q.y) / 2 + ny / nl * off }, q);
-        }
-        pts = np; disp *= 0.55;
-      }
-      for (const [w, al] of [[6, 0.12], [2.5, 0.45], [1, 0.95]]) {
-        ctx.strokeStyle = al > 0.9 ? '#ffffff' : rgba(col, al); ctx.lineWidth = w;
-        ctx.beginPath(); ctx.moveTo(pts[0].x, pts[0].y);
-        for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
-        ctx.stroke();
-      }
-    }
-    ctx.globalCompositeOperation = 'source-over';
-  }
-
-  drawWeb(S, h1, h2, t) {
-    const { ctx } = this;
-    ctx.lineWidth = 1.1;
-    TIPS.forEach((tip, k) => {
-      const a = h1.pts[tip], b = h2.pts[tip];
-      const sag = Math.min(60, Math.hypot(b.x - a.x, b.y - a.y) * 0.12);
-      ctx.strokeStyle = rgba(FINGER_COLORS[k], 0.75);
-      ctx.beginPath(); ctx.moveTo(a.x, a.y);
-      ctx.quadraticCurveTo((a.x + b.x) / 2, (a.y + b.y) / 2 + sag + Math.sin(t * 0.004 + k) * 3, b.x, b.y);
-      ctx.stroke();
-    });
-    // cross strings
-    ctx.strokeStyle = rgba(S.accent, 0.25);
-    for (let k = 0; k < 4; k++) {
-      const a = h1.pts[TIPS[k]], b = h2.pts[TIPS[k + 1]];
-      ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
-    }
-  }
-
   // ---------------- arms ----------------
   drawArm(S, arm, scene) {
     const { ctx } = this;
@@ -730,8 +685,9 @@ export class Overlay2D {
       ctx.setLineDash([]);
       this.seg(mHp, mSh, 1.4, S.secondary);
       const leanDeg = Math.atan2(mSh.x - mHp.x, mHp.y - mSh.y) * 180 / Math.PI;
+      const over = S.bodyLeanWarn && Math.abs(leanDeg) > (S.bodyLeanThreshold || 12);
       const mid = { x: (mHp.x + mSh.x) / 2, y: (mHp.y + mSh.y) / 2 };
-      this.readout(S, mid.x + 14 * k, mid.y, `LEAN ${leanDeg >= 0 ? '+' : ''}${leanDeg.toFixed(0)}°`, S.secondary);
+      this.readout(S, mid.x + 14 * k, mid.y, `LEAN ${leanDeg >= 0 ? '+' : ''}${leanDeg.toFixed(0)}°${over ? ' ⚠' : ''}`, over ? '#ff5d73' : S.secondary);
       if (S.bodyTilt && vis(11) && vis(12)) {
         const tilt = Math.atan2(P[12].y - P[11].y, P[12].x - P[11].x) * 180 / Math.PI;
         ctx.setLineDash([2, 4]);
@@ -964,14 +920,16 @@ export class Overlay2D {
       this.panel(S, 18, h - 150 - rows.length * 17, 150, rows.length * 17 + 10, 'CLASS CENSUS', rows, S.secondary);
     }
     if (S.objRadar) {
-      const R = Math.min(64, w * 0.12), rx = w - R - 28, ry = h - R - 160;
+      const R = Math.min(S.radarSize || 64, w * 0.22), rx = w - R - 28, ry = h - R - 160;
       ctx.fillStyle = 'rgba(5,7,8,.6)'; ctx.beginPath(); ctx.arc(rx, ry, R, 0, 7); ctx.fill();
       ctx.strokeStyle = rgba(col, 0.5); ctx.lineWidth = 1;
-      for (const fk of [1, 0.66, 0.33]) { ctx.beginPath(); ctx.arc(rx, ry, R * fk, 0, 7); ctx.stroke(); }
+      if (S.radarRings !== false) for (const fk of [1, 0.66, 0.33]) { ctx.beginPath(); ctx.arc(rx, ry, R * fk, 0, 7); ctx.stroke(); }
       ctx.beginPath(); ctx.moveTo(rx - R, ry); ctx.lineTo(rx + R, ry); ctx.moveTo(rx, ry - R); ctx.lineTo(rx, ry + R); ctx.stroke();
-      const a = (t * 0.0022) % (Math.PI * 2);
-      const gr = ctx.createConicGradient ? ctx.createConicGradient(a - 0.9, rx, ry) : null;
-      if (gr) { gr.addColorStop(0, 'rgba(0,0,0,0)'); gr.addColorStop(0.14, rgba(col, 0.28)); gr.addColorStop(0.1433, 'rgba(0,0,0,0)'); gr.addColorStop(1, 'rgba(0,0,0,0)'); ctx.fillStyle = gr; ctx.beginPath(); ctx.arc(rx, ry, R, 0, 7); ctx.fill(); }
+      if (S.radarSweep !== false) {
+        const a = (t * 0.0022) % (Math.PI * 2);
+        const gr = ctx.createConicGradient ? ctx.createConicGradient(a - 0.9, rx, ry) : null;
+        if (gr) { gr.addColorStop(0, 'rgba(0,0,0,0)'); gr.addColorStop(0.14, rgba(col, 0.28)); gr.addColorStop(0.1433, 'rgba(0,0,0,0)'); gr.addColorStop(1, 'rgba(0,0,0,0)'); ctx.fillStyle = gr; ctx.beginPath(); ctx.arc(rx, ry, R, 0, 7); ctx.fill(); }
+      }
       const f2 = Math.max(w, h) * 0.87;
       for (const o of objs) {
         const r = o.rect;
@@ -1037,30 +995,29 @@ export class Overlay2D {
           ctx.fillStyle = S.secondary; ctx.beginPath(); ctx.arc(c.x, c.y, 1.5, 0, 7); ctx.fill();
         }
       }
-      if (S.faceAura) {
-        // centroid + radius of the mesh
-        let cx = 0, cy = 0;
-        for (const p of P) { cx += p.x; cy += p.y; }
-        cx /= P.length; cy /= P.length;
-        let r = 0;
-        for (const p of P) r = Math.max(r, Math.hypot(p.x - cx, p.y - cy));
-        // dominant expression drives intensity
-        const dom = (face.blend || [])
-          .filter((c) => c.categoryName && c.categoryName !== '_neutral')
-          .sort((a, b) => b.score - a.score)[0];
-        const inten = dom ? clamp(dom.score, 0, 1) : 0;
-        ctx.save();
-        ctx.globalCompositeOperation = 'lighter';
-        for (let k = 0; k < 3; k++) {
-          const ph = (((t / 1500 + k / 3) % 1) + 1) % 1;
-          ctx.globalAlpha = (1 - ph) * (0.14 + inten * 0.4);
-          ctx.strokeStyle = dom && inten > 0.12 ? S.accent : S.secondary;
-          ctx.lineWidth = 1.5 + inten;
-          ctx.beginPath();
-          ctx.arc(cx, cy, r * (1.05 + ph * (S.faceAuraRange - 1.05) + k * 0.045), 0, Math.PI * 2);
-          ctx.stroke();
-        }
-        ctx.restore();
+      if (S.faceGaze && S.faceIris) {
+        // gaze vector: iris-centre offset from eye-centre, mapped to degrees
+        const eye = (ring, iris) => {
+          const ec = { x: ring.reduce((s, i) => s + P[i].x, 0) / ring.length, y: ring.reduce((s, i) => s + P[i].y, 0) / ring.length };
+          const ic = { x: iris.reduce((s, i) => s + P[i].x, 0) / iris.length, y: iris.reduce((s, i) => s + P[i].y, 0) / iris.length };
+          const rr = Math.hypot(P[ring[0]].x - ec.x, P[ring[0]].y - ec.y) || 1;
+          return { dx: (ic.x - ec.x) / rr, dy: (ic.y - ec.y) / rr };
+        };
+        const gl = eye(FACE_RINGS.eyeL, FACE_RINGS.irisL);
+        const gr = eye(FACE_RINGS.eyeR, FACE_RINGS.irisR);
+        const bearing = clamp(((gl.dx + gr.dx) / 2) * 38, -45, 45); // horizontal look angle, deg
+        const elev = clamp(((gl.dy + gr.dy) / 2) * 30, -35, 35);  // vertical look angle, deg
+        ctx.strokeStyle = rgba(S.secondary, 0.8); ctx.lineWidth = 1.2;
+        ctx.font = `600 10px ${MONO}`; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+        const ox = (P[FACE_RINGS.oval[0]].x + P[FACE_RINGS.oval[8]].x) / 2;
+        const oy = Math.min(P[FACE_RINGS.oval[16]].y, P[FACE_RINGS.oval[0]].y) - 14;
+        ctx.beginPath(); ctx.moveTo(ox - 18, oy); ctx.lineTo(ox + 18, oy); ctx.stroke();
+        const px = ox + clamp(bearing / 45, -1, 1) * 18;
+        const py = oy + clamp(elev / 35, -1, 1) * 7;
+        ctx.strokeStyle = S.accent; ctx.beginPath(); ctx.moveTo(ox - 18, oy); ctx.lineTo(px, py); ctx.stroke();
+        ctx.fillStyle = S.accent; ctx.beginPath(); ctx.arc(px, py, 2.2, 0, 7); ctx.fill();
+        ctx.fillStyle = rgba(S.secondary, 0.85);
+        ctx.fillText(`GAZE ${bearing >= 0 ? '+' : ''}${bearing.toFixed(0)}° ${elev >= 0 ? '+' : ''}${elev.toFixed(0)}°`, ox, oy - 6);
       }
       if (S.faceBBox) {
         let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
@@ -1106,7 +1063,17 @@ export class Overlay2D {
         }
       }
     }
+    if (!faces.length) { this.blinkCount = 0; this.blinkOpen = true; }
     const face = faces[0];
+    if (face && S.faceBlinks && face.blend) {
+      const b = (n) => { const e = face.blend.find((c) => c.categoryName === n); return e ? e.score : 0; };
+      const closed = Math.max(b('eyeBlinkLeft'), b('eyeBlinkRight'));
+      if (closed > 0.5 && this.blinkOpen !== false) { this.blinkOpen = false; this.blinkCount = (this.blinkCount || 0) + 1; }
+      else if (closed < 0.35 && this.blinkOpen !== true) this.blinkOpen = true;
+    }
+    if (face && S.faceBlinks) {
+      this.panel(S, 18, 136, 150, 44, 'BLINK COUNT', [['TALLY', String(this.blinkCount || 0).padStart(3, '0')], ['LIDS', this.blinkOpen === false ? 'CLOSED' : 'OPEN']], S.secondary);
+    }
     if (face && S.faceBlend && face.blend) {
       const cats = face.blend.filter((c) => c.categoryName !== '_neutral').sort((a, b) => b.score - a.score).slice(0, S.faceBlendCount);
       const bw = 250, bh = cats.length * 16 + 30;
@@ -1139,122 +1106,6 @@ export class Overlay2D {
     }
   }
 
-  // ---------------- particles & ripples ----------------
-  emit(S, hand, dt) {
-    const rate = S.particleRate;
-    for (const tip of TIPS) {
-      const p = hand.pts[tip], n = hand.norm[tip];
-      const speed = Math.hypot(n.vx || 0, n.vy || 0);
-      const count = Math.min(6, Math.floor(rate * (0.15 + speed * 1.2) + Math.random()));
-      for (let k = 0; k < count; k++) {
-        if (this.particles.length > 700) this.particles.shift();
-        const a = Math.random() * Math.PI * 2, v = 20 + Math.random() * 80;
-        this.particles.push({
-          x: p.x, y: p.y, vx: Math.cos(a) * v - (n.vx || 0) * 60 * (S.mirror ? -1 : 1), vy: Math.sin(a) * v - (n.vy || 0) * 60,
-          life: 0, max: 0.5 + Math.random() * 0.8,
-          col: S.colorMode === 'finger' ? FINGER_COLORS[TIPS.indexOf(tip)] : (Math.random() < 0.3 ? S.secondary : S.accent),
-          s: 1 + Math.random() * 2.2,
-        });
-      }
-    }
-  }
-
-  // ---------------- twin fan mesh ----------------
-  // Two counter-rotating turbine meshes suspended in the palm.
-  drawFans(S, hand, t) {
-    const { ctx } = this;
-    // prune velocity memory of hands no longer tracked
-    if (this.fanPrev?.size > 8) for (const [k, v] of this.fanPrev) if (t - v.t > 2000) this.fanPrev.delete(k);
-    const palm = hand.pts[9];
-    const R = Math.max(22, (hand.palmPx || 70) * 0.5 * S.fanSize);
-    const TAU = Math.PI * 2;
-
-    // motion sync: fan speed follows hand velocity
-    let boost = 1;
-    if (S.fanSync) {
-      const prev = this.fanPrev?.get(hand.id);
-      if (prev) {
-        const dt = Math.max(0.008, (t - prev.t) / 1000);
-        const v = Math.hypot(palm.x - prev.x, palm.y - prev.y) / dt;
-        boost = 1 + Math.min(3.2, v / ((hand.palmPx || 70) * 1.4));
-      }
-      (this.fanPrev ??= new Map()).set(hand.id, { x: palm.x, y: palm.y, t });
-    }
-    const spin = (t / 1000) * S.fanSpeed * boost;
-
-    ctx.save();
-    if (S.fanGlow) ctx.globalCompositeOperation = 'lighter';
-
-    if (S.fanStyle === 'pulse') {
-      for (let k = 0; k < 3; k++) {
-        const ph = ((spin * 0.35 + k / 3) % 1 + 1) % 1;
-        ctx.globalAlpha = (1 - ph) * 0.5;
-        ctx.strokeStyle = S.accent; ctx.lineWidth = 2;
-        ctx.beginPath(); ctx.arc(palm.x, palm.y, Math.max(2, R * ph), 0, TAU); ctx.stroke();
-        const ph2 = (((-spin * 0.55 + k / 3 + 0.5) % 1) + 1) % 1;
-        ctx.globalAlpha = (1 - ph2) * 0.32;
-        ctx.strokeStyle = S.secondary;
-        ctx.beginPath(); ctx.arc(palm.x, palm.y, Math.max(2, R * ph2), 0, TAU); ctx.stroke();
-      }
-    } else if (S.fanStyle === 'vortex') {
-      this.fanBlades(palm, R * 1.18, S.fanBlades, spin * 0.8, S.accent, 2.4);
-      this.fanBlades(palm, R * 0.6, Math.max(3, S.fanBlades - 1), -spin * 1.9, S.secondary, 1.5);
-      if (S.fanMeshRing) this.fanRing(palm, R * 0.88, S.fanBlades * 2, -spin * 0.4, rgba(toHex(S.secondary), 0.45), 1);
-    } else {
-      // twin counter-rotors
-      this.fanBlades(palm, R, S.fanBlades, spin, S.accent, 2.2);
-      this.fanBlades(palm, R * 0.55, Math.max(3, S.fanBlades - 1), -spin * 1.7, S.secondary, 1.6);
-      if (S.fanMeshRing) this.fanRing(palm, R, S.fanBlades, spin, rgba(toHex(S.accent), 0.5), 1);
-    }
-    ctx.restore();
-  }
-
-  fanBlades(c, R, n, spin, col, lw) {
-    const { ctx } = this;
-    ctx.strokeStyle = col; ctx.lineWidth = lw; ctx.lineCap = 'round';
-    const TAU = Math.PI * 2;
-    for (let i = 0; i < n; i++) {
-      const a = spin + (i * TAU) / n;
-      ctx.beginPath();
-      ctx.moveTo(c.x + Math.cos(a) * R * 0.14, c.y + Math.sin(a) * R * 0.14);
-      ctx.quadraticCurveTo(
-        c.x + Math.cos(a + 0.18) * R * 0.62, c.y + Math.sin(a + 0.18) * R * 0.62,
-        c.x + Math.cos(a + 0.42) * R, c.y + Math.sin(a + 0.42) * R,
-      );
-      ctx.stroke();
-    }
-  }
-
-  fanRing(c, R, n, spin, col, lw) {
-    const { ctx } = this;
-    ctx.strokeStyle = col; ctx.lineWidth = lw; ctx.beginPath();
-    const TAU = Math.PI * 2;
-    for (let i = 0; i <= n; i++) {
-      const a = spin + (i * TAU) / n;
-      const x = c.x + Math.cos(a) * R, y = c.y + Math.sin(a) * R;
-      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-    }
-    ctx.stroke();
-  }
-
-  drawParticles(S, dt) {
-    if (!this.particles.length) return;
-    const { ctx } = this;
-    ctx.globalCompositeOperation = 'lighter';
-    const out = [];
-    for (const p of this.particles) {
-      p.life += dt; if (p.life > p.max) continue;
-      p.vy += 60 * dt; p.vx *= 0.97; p.vy *= 0.97;
-      p.x += p.vx * dt; p.y += p.vy * dt;
-      const k = 1 - p.life / p.max;
-      ctx.fillStyle = rgba(p.col, k);
-      this.rrect(p.x - p.s / 2, p.y - p.s / 2, p.s, p.s, p.s * 0.3); ctx.fill();
-      out.push(p);
-    }
-    this.particles = out;
-    ctx.globalCompositeOperation = 'source-over';
-  }
-
   drawRipples(t) {
     const { ctx } = this;
     this.ripples = this.ripples.filter((r) => t - r.t0 < 600);
@@ -1266,62 +1117,6 @@ export class Overlay2D {
     }
   }
 
-  // ---------------- air paint ----------------
-  updatePaint(S, scene) {
-    const now = scene.t;
-    const live = new Set();
-    for (const hand of scene.hands) {
-      live.add(hand.id);
-      const n4 = hand.norm[4], n8 = hand.norm[8];
-      const pt = { x: (n4.x + n8.x) / 2, y: (n4.y + n8.y) / 2, t: now };
-      let stroke = this.activeStroke.get(hand.id);
-      if (hand.paintDown) {
-        if (!stroke) {
-          stroke = { pts: [], color: S.colorMode === 'rainbow' ? `hsl(${(now * 0.05) % 360},90%,64%)` : (hand.slot % 2 ? S.secondary : S.accent), done: false, t: now };
-          this.strokes.push(stroke); this.activeStroke.set(hand.id, stroke);
-        }
-        const last = stroke.pts[stroke.pts.length - 1];
-        if (!last || Math.hypot(last.x - pt.x, last.y - pt.y) > 0.002) stroke.pts.push(pt);
-        stroke.t = now;
-      } else if (stroke) { stroke.done = true; this.activeStroke.delete(hand.id); }
-    }
-    for (const [id, s] of this.activeStroke) if (!live.has(id)) { s.done = true; this.activeStroke.delete(id); }
-    if (S.paintFade > 0) {
-      const life = S.paintFade * 1000;
-      this.strokes = this.strokes.filter((s) => !s.done || now - s.t < life);
-    }
-    if (this.strokes.length > 400) this.strokes.shift();
-  }
-
-  drawPaint(S, scene) {
-    const { ctx } = this;
-    const map = scene.map;
-    const now = scene.t;
-    for (const s of this.strokes) {
-      if (s.pts.length < 2) continue;
-      const fade = S.paintFade > 0 && s.done ? clamp(1 - (now - s.t) / (S.paintFade * 1000), 0, 1) : 1;
-      const pts = s.pts.map((p) => map(p.x, p.y));
-      const col = toHex(s.color);
-      for (const [w, a] of [[14, 0.08], [7, 0.22], [3, 1]]) {
-        ctx.strokeStyle = w === 3 ? rgba(col, fade) : rgba(col, a * fade);
-        ctx.lineWidth = w;
-        ctx.beginPath(); ctx.moveTo(pts[0].x, pts[0].y);
-        for (let i = 1; i < pts.length - 1; i++) {
-          const mx = (pts[i].x + pts[i + 1].x) / 2, my = (pts[i].y + pts[i + 1].y) / 2;
-          ctx.quadraticCurveTo(pts[i].x, pts[i].y, mx, my);
-        }
-        ctx.lineTo(pts[pts.length - 1].x, pts[pts.length - 1].y);
-        ctx.stroke();
-      }
-    }
-    // cursor for painting hands
-    for (const hand of scene.hands) {
-      const a = hand.pts[4], b = hand.pts[8];
-      const x = (a.x + b.x) / 2, y = (a.y + b.y) / 2;
-      ctx.strokeStyle = hand.paintDown ? S.secondary : rgba(S.accent, 0.6); ctx.lineWidth = 1.5;
-      ctx.beginPath(); ctx.arc(x, y, hand.paintDown ? 5 : 9, 0, 7); ctx.stroke();
-    }
-  }
 }
 
 // Convert hsl()/rgb()/hex to hex for rgba helper
@@ -1336,4 +1131,12 @@ function toHex(col) {
   if (_cache.size > 2000) _cache.clear();
   _cache.set(col, v);
   return v;
+}
+
+// linear interpolation between two hex colours, t in [0, 1]
+function mixHex(a, b, t) {
+  const pa = hexToRgb(toHex(a)), pb = hexToRgb(toHex(b));
+  const mix = (x, y) => Math.round(x + (y - x) * clamp(t, 0, 1));
+  return '#' + [mix(pa[0], pb[0]), mix(pa[1], pb[1]), mix(pa[2], pb[2])]
+    .map((n) => n.toString(16).padStart(2, '0')).join('');
 }

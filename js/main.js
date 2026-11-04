@@ -1,5 +1,5 @@
 // Kinesis — app controller.
-import { DEFAULTS, PRESETS, STORAGE_KEY, SCHEMA } from './config.js';
+import { DEFAULTS, STORAGE_KEY, SCHEMA } from './config.js';
 import { hydrateIcons, icon } from './icons.js';
 import { Tracker } from './tracker.js';
 import { HandFilter, OneEuro, GestureStabiliser, analyseHand, mlGestureName, dist3, clamp, jointAngle } from './geometry.js';
@@ -17,7 +17,7 @@ function loadSettings() {
   const st = { ...DEFAULTS, ...saved };
   const m = location.hash.match(/cfg=([^&]+)/);
   if (m) { try { Object.assign(st, JSON.parse(decodeURIComponent(escape(atob(m[1]))))); } catch {} }
-  for (const k of Object.keys(st)) if (!(k in DEFAULTS) && k !== '__preset') delete st[k];
+  for (const k of Object.keys(st)) if (!(k in DEFAULTS)) delete st[k];
   return st;
 }
 let saveTimer = 0;
@@ -49,7 +49,7 @@ function layout() {
   L.vw = video.videoWidth || 1280; L.vh = video.videoHeight || 720;
   L.s = S.videoFit === 'contain' ? Math.min(L.w / L.vw, L.h / L.vh) : Math.max(L.w / L.vw, L.h / L.vh);
   L.ox = (L.w - L.vw * L.s) / 2; L.oy = (L.h - L.vh * L.s) / 2;
-  L.dpr = Math.min(3, (window.devicePixelRatio || 1) * S.renderScale);
+  L.dpr = Math.min(3, (window.devicePixelRatio || 1) * S.renderScale * adaptiveLevel);
   overlay.resize(L.w, L.h, L.dpr);
   hand3d?.resize(L.w, L.h, Math.min(2, L.dpr));
   video.style.objectFit = S.videoFit;
@@ -62,25 +62,20 @@ const map = (nx, ny) => {
 new ResizeObserver(() => layout()).observe(stage);
 
 // ---------------- video treatment ----------------
-const FILTERS = {
-  none: '', mono: 'grayscale(1) contrast(1.08)', noir: 'grayscale(1) contrast(1.55) brightness(0.92)',
-  night: 'grayscale(1) sepia(1) hue-rotate(58deg) saturate(3.2) contrast(1.25)', thermal: 'url(#thermal)',
-  cyan: 'grayscale(0.7) sepia(0.35) hue-rotate(160deg) saturate(1.8)', invert: 'grayscale(1) invert(1) contrast(1.15)', hidden: '',
-};
 function videoFilterCSS() {
-  const parts = [FILTERS[S.videoFilter] || ''];
+  const parts = [];
   if (S.videoDim !== 1) parts.push(`brightness(${S.videoDim})`);
   if (S.videoBlur) parts.push(`blur(${S.videoBlur}px)`);
   return parts.filter(Boolean).join(' ');
 }
 function applyVisuals() {
-  video.style.filter = videoFilterCSS();
-  video.style.opacity = S.videoFilter === 'hidden' ? 0 : 1;
+  video.style.filter = videoFilterCSS() || 'none';
   video.classList.toggle('mirrored', !!S.mirror);
   const root = document.documentElement;
   root.style.setProperty('--accent', S.uiAccent);
   document.body.classList.toggle('reduce-motion', !!S.reduceMotion);
   stage.classList.toggle('fx-grid', !!S.grid);
+  stage.dataset.grid = S.gridStyle || 'lines';
   stage.classList.toggle('fx-scan', !!S.scanlines);
   stage.classList.toggle('fx-vignette', !!S.vignette);
   stage.classList.toggle('fx-frame', !!S.frameHud);
@@ -91,7 +86,6 @@ function applyVisuals() {
   c3d.classList.toggle('hidden', !S.hand3d);
   const handsOnly = S.trackingMode === 'hands';
   $('#btn-3d').classList.toggle('hidden', !handsOnly);
-  $('#btn-paint').classList.toggle('hidden', !handsOnly);
 }
 
 // ---------------- camera ----------------
@@ -136,6 +130,7 @@ const poseFilters = Array.from({ length: 33 }, () => [new OneEuro(), new OneEuro
 let poseSmoothed = null;
 const stats = { renderFps: 0, inferHz: 0, ms: 0, frames: 0, infers: 0, last: performance.now(), hist: [] };
 let lastVideoTime = -1, lastInfer = 0;
+let adaptiveLevel = 1, adaptiveStable = 0;
 
 function ingest(res, now) {
   if (res.objects) ingestObjects(res.objects, now);
@@ -184,7 +179,11 @@ function ingestObjects(dets, now) {
     x0: d.boundingBox.originX / VW, y0: d.boundingBox.originY / VH,
     x1: (d.boundingBox.originX + d.boundingBox.width) / VW, y1: (d.boundingBox.originY + d.boundingBox.height) / VH,
   });
-  const nd = dets.map(norm).filter((d) => d.cls);
+  let nd = dets.map(norm).filter((d) => d.cls);
+  if (S.objClassFilter && S.objClassFilter.trim()) {
+    const allow = S.objClassFilter.split(',').map((c) => c.trim().toLowerCase()).filter(Boolean);
+    nd = nd.filter((d) => allow.includes(d.cls.toLowerCase()));
+  }
   const used = new Set();
   const pairs = [];
   objTracks.forEach((t, ti) => nd.forEach((d, di) => pairs.push([Math.hypot(objCenter(t.box).x - objCenter(d).x, objCenter(t.box).y - objCenter(d).y), ti, di])));
@@ -387,7 +386,9 @@ function loop() {
   if (captureReq) { const r = captureReq; captureReq = null; r(composite()); }
   if (recorder && recorder.state === 'recording') composite(recCanvas, recCtx);
 
-  if (now - stats.last > 500) updateTelemetry(now, scene);
+  sampleDataLog(now);
+  runGestureCommands(now);
+  if (now - stats.last > 500) { updateTelemetry(now, scene); runAdaptiveQuality(now); }
   if (S.frameHud && now - lastClock > 40) {
     lastClock = now;
     const ms = now - startedAt, f = Math.floor((ms % 1000) / 1000 * 30), sec = Math.floor(ms / 1000);
@@ -487,18 +488,18 @@ function composite(cv, cx) {
   if (cv.width !== W || cv.height !== H) { cv.width = W; cv.height = H; }
   cx.save();
   cx.fillStyle = '#050607'; cx.fillRect(0, 0, W, H);
-  if (S.videoFilter !== 'hidden') {
-    try { cx.filter = videoFilterCSS() || 'none'; } catch {}
-    cx.save();
-    if (S.mirror) { cx.translate(W, 0); cx.scale(-1, 1); }
-    cx.drawImage(video, L.ox * L.dpr, L.oy * L.dpr, L.vw * L.s * L.dpr, L.vh * L.s * L.dpr);
-    cx.restore();
-    cx.filter = 'none';
-  }
+  try { cx.filter = videoFilterCSS() || 'none'; } catch {}
+  cx.save();
+  if (S.mirror) { cx.translate(W, 0); cx.scale(-1, 1); }
+  cx.drawImage(video, L.ox * L.dpr, L.oy * L.dpr, L.vw * L.s * L.dpr, L.vh * L.s * L.dpr);
+  cx.restore();
+  cx.filter = 'none';
   if (S.hand3d && hand3d) cx.drawImage(c3d, 0, 0, W, H);
   cx.drawImage(c2d, 0, 0, W, H);
-  cx.font = `600 ${12 * L.dpr}px "Geist Mono", monospace`; cx.fillStyle = 'rgba(255,255,255,.55)';
-  cx.fillText('KINESIS · ' + new Date().toISOString().slice(0, 19).replace('T', ' '), 16 * L.dpr, H - 16 * L.dpr);
+  if (S.shotWatermark) {
+    cx.font = `600 ${12 * L.dpr}px "Geist Mono", monospace`; cx.fillStyle = 'rgba(255,255,255,.55)';
+    cx.fillText('KINESIS · ' + new Date().toISOString().slice(0, 19).replace('T', ' '), 16 * L.dpr, H - 16 * L.dpr);
+  }
   cx.restore();
   return cv;
 }
@@ -525,7 +526,7 @@ function toggleRecord() {
   const types = ['video/mp4;codecs=avc1', 'video/mp4', 'video/webm;codecs=vp9', 'video/webm'];
   const mime = types.find((t) => MediaRecorder.isTypeSupported?.(t)) || '';
   const chunks = [];
-  try { recorder = new MediaRecorder(recCanvas.captureStream(30), mime ? { mimeType: mime, videoBitsPerSecond: 8e6 } : undefined); }
+  try { recorder = new MediaRecorder(recCanvas.captureStream(30), mime ? { mimeType: mime, videoBitsPerSecond: (+S.recBitrate || 8) * 1e6 } : undefined); }
   catch { toast('Could not start recorder', 'warn', 'triangle-alert'); return; }
   recorder.ondataavailable = (e) => e.data.size && chunks.push(e.data);
   recorder.onstop = () => {
@@ -539,6 +540,115 @@ function toggleRecord() {
   const t0 = Date.now();
   const tick = () => { if (!recorder) return; const s = Math.floor((Date.now() - t0) / 1000); $('#rec-time').textContent = `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`; setTimeout(tick, 500); };
   tick();
+}
+
+// ---------------- data stream & frame export ----------------
+let dataLog = null; // { rows: [], lastT: 0, header: string[], mode }
+function startDataLog() {
+  if (dataLog) return;
+  const mode = S.trackingMode;
+  let header;
+  if (mode === 'body') header = ['t_ms', 'landmark', 'x', 'y', 'z', 'visibility'];
+  else if (mode === 'objects') header = ['t_ms', 'track_id', 'class', 'score', 'x0', 'y0', 'x1', 'y1'];
+  else if (mode === 'face') header = ['t_ms', 'face', 'yaw_deg', 'pitch_deg', 'roll_deg', 'blink_l', 'blink_r'];
+  else header = ['t_ms', 'track_id', 'handedness', 'gesture', 'pinch_mm', 'landmark', 'x', 'y', 'z'];
+  dataLog = { rows: [], lastT: 0, mode };
+  toast(`Recording ${mode} stream at ${S.dataLogHz} Hz`, 'ok', 'download');
+}
+function stopDataLog(silent) {
+  if (!dataLog) return;
+  const { rows, mode } = dataLog;
+  dataLog = null;
+  if (!rows.length) { if (!silent) toast('Stream was empty', 'warn', 'triangle-alert'); return; }
+  let header;
+  if (mode === 'body') header = 't_ms,landmark,x,y,z,visibility';
+  else if (mode === 'objects') header = 't_ms,track_id,class,score,x0,y0,x1,y1';
+  else if (mode === 'face') header = 't_ms,face,yaw_deg,pitch_deg,roll_deg,blink_l,blink_r';
+  else header = 't_ms,track_id,handedness,gesture,pinch_mm,landmark,x,y,z';
+  const csv = [header, ...rows].join('\n');
+  saveBlob(new Blob([csv], { type: 'text/csv' }), `kinesis-${mode}-${Date.now()}.csv`);
+  if (!silent) toast(`Stream saved · ${rows.length} rows`, 'ok', 'download');
+}
+function sampleDataLog(now) {
+  if (!dataLog || paused) return;
+  const interval = 1000 / (+S.dataLogHz || 30);
+  if (now - dataLog.lastT < interval) return;
+  dataLog.lastT = now;
+  const R = dataLog.rows;
+  if (dataLog.mode === 'hands') {
+    for (const t of tracks) {
+      if (!t.norm) continue;
+      const g = t.gesture || 'Unknown';
+      for (let i = 0; i < t.norm.length; i++) {
+        const p = t.norm[i];
+        R.push([now.toFixed(1), t.id, t.handedness, g, t.pinchMM != null ? t.pinchMM.toFixed(1) : '', i, p.x.toFixed(5), p.y.toFixed(5), p.z.toFixed(5)].join(','));
+      }
+    }
+  } else if (dataLog.mode === 'body' && poseSmoothed) {
+    poseSmoothed.forEach((p, i) => R.push([now.toFixed(1), i, p.x.toFixed(5), p.y.toFixed(5), p.z.toFixed(5), (p.v ?? 1).toFixed(3)].join(',')));
+  } else if (dataLog.mode === 'objects') {
+    for (const t of objTracks) R.push([now.toFixed(1), t.id, t.cls, t.score.toFixed(3), t.box.x0.toFixed(4), t.box.y0.toFixed(4), t.box.x1.toFixed(4), t.box.y1.toFixed(4)].join(','));
+  } else if (dataLog.mode === 'face') {
+    faceTracks.forEach((f, i) => {
+      let yaw = '', pitch = '', roll = '', bl = '', br = '';
+      if (f.matrix) {
+        const m = f.matrix;
+        yaw = (Math.atan2(m[8], m[10]) * 180 / Math.PI).toFixed(1);
+        pitch = (Math.asin(clamp(-m[9], -1, 1)) * 180 / Math.PI).toFixed(1);
+        roll = (Math.atan2(m[1], m[5]) * 180 / Math.PI).toFixed(1);
+      }
+      const get = (n) => f.blend?.find((c) => c.categoryName === n)?.score.toFixed(3) ?? '';
+      bl = get('eyeBlinkLeft'); br = get('eyeBlinkRight');
+      R.push([now.toFixed(1), i, yaw, pitch, roll, bl, br].join(','));
+    });
+  }
+}
+function exportFrame() {
+  if (!running) { toast('Start tracking first', 'warn', 'triangle-alert'); return; }
+  const frame = {
+    app: 'Kinesis', version: '4.0.0', captured: new Date().toISOString(),
+    mode: S.trackingMode, video: { width: L.vw, height: L.vh, mirrored: !!S.mirror },
+    stats: { renderFps: +stats.renderFps.toFixed(1), inferHz: +stats.inferHz.toFixed(1), inferenceMs: +stats.ms.toFixed(1) },
+  };
+  if (S.trackingMode === 'hands' || S.armTracking) {
+    frame.hands = tracks.filter((t) => t.norm).map((t) => ({
+      id: t.id, handedness: t.handedness, score: +t.score.toFixed(3), gesture: t.gesture,
+      pinchMM: t.pinchMM != null ? +t.pinchMM.toFixed(1) : null,
+      landmarks: t.norm.map((p) => [+p.x.toFixed(5), +p.y.toFixed(5), +p.z.toFixed(5)]),
+    }));
+  }
+  if (poseSmoothed) frame.pose = poseSmoothed.map((p) => [+p.x.toFixed(5), +p.y.toFixed(5), +p.z.toFixed(5), +(p.v ?? 1).toFixed(3)]);
+  if (S.trackingMode === 'objects') frame.objects = objTracks.map((t) => ({ id: t.id, class: t.cls, score: +t.score.toFixed(3), box: [t.box.x0, t.box.y0, t.box.x1, t.box.y1].map((v) => +v.toFixed(4)) }));
+  if (S.trackingMode === 'face') frame.faces = faceTracks.map((f) => ({ landmarks: f.lm.map((p) => [+p.x.toFixed(5), +p.y.toFixed(5), +p.z.toFixed(5)]), headMatrix: f.matrix ? [...f.matrix].map((v) => +v.toFixed(4)) : null, blendshapes: f.blend ? f.blend.map((c) => [c.categoryName, +c.score.toFixed(3)]) : null }));
+  saveBlob(new Blob([JSON.stringify(frame, null, 2)], { type: 'application/json' }), `kinesis-frame-${Date.now()}.json`);
+  toast('Frame exported', 'ok', 'download');
+}
+
+// ---------------- gesture commands ----------------
+const cmdState = { pinchSince: 0, thumbsSince: 0, pinchDone: false, thumbsDone: false };
+function runGestureCommands(now) {
+  if (!S.gestureCommands || S.trackingMode !== 'hands' || paused) { cmdState.pinchSince = cmdState.thumbsSince = 0; return; }
+  const live = tracks.filter((t) => t.norm);
+  const pinching = live.some((t) => t.analysis?.pinching);
+  const thumbs = live.some((t) => t.gesture === 'Thumbs up');
+  if (pinching) {
+    if (!cmdState.pinchSince) { cmdState.pinchSince = now; cmdState.pinchDone = false; }
+    if (!cmdState.pinchDone && now - cmdState.pinchSince > 1000) { cmdState.pinchDone = true; capture(); }
+  } else cmdState.pinchSince = 0;
+  if (thumbs) {
+    if (!cmdState.thumbsSince) { cmdState.thumbsSince = now; cmdState.thumbsDone = false; }
+    if (!cmdState.thumbsDone && now - cmdState.thumbsSince > 1000) { cmdState.thumbsDone = true; toggleRecord(); }
+  } else cmdState.thumbsSince = 0;
+}
+
+// ---------------- adaptive quality ----------------
+function runAdaptiveQuality(now) {
+  if (!S.adaptiveQuality) { if (adaptiveLevel !== 1) { adaptiveLevel = 1; layout(); } return; }
+  // react at most twice a second, only to sustained trends
+  if (now - adaptiveStable < 500) return;
+  const fps = stats.renderFps;
+  if (fps > 10 && fps < 40 && adaptiveLevel > 0.5) { adaptiveLevel = Math.max(0.5, adaptiveLevel - 0.25); adaptiveStable = now; layout(); }
+  else if (fps >= 55 && adaptiveLevel < 1) { adaptiveLevel = Math.min(1, adaptiveLevel + 0.25); adaptiveStable = now; layout(); }
 }
 
 // ---------------- wake lock / fullscreen ----------------
@@ -592,11 +702,10 @@ function scheduleReinit(kind) {
 }
 
 // ---------------- settings ----------------
-const VISUAL_KEYS = new Set(['mirror', 'videoFilter', 'videoDim', 'videoBlur', 'grid', 'scanlines', 'vignette', 'frameHud', 'scanSweep', 'uiAccent', 'reduceMotion', 'telemetry', 'fpsGraph', 'hand3d', 'hand3dShadow']);
+const VISUAL_KEYS = new Set(['mirror', 'videoDim', 'videoBlur', 'grid', 'gridStyle', 'scanlines', 'vignette', 'frameHud', 'scanSweep', 'uiAccent', 'reduceMotion', 'telemetry', 'fpsGraph', 'hand3d', 'hand3dShadow']);
 function setTrackingMode(v) {
   S.trackingMode = v;
   tracks = []; objTracks = []; faceTracks = []; poseSmoothed = null;
-  overlay.clearPaint();
   applyVisuals(); ui.refresh();
   toast(`Tracking mode: ${v}`, 'ok', 'cpu');
 }
@@ -605,26 +714,22 @@ const ui = new SettingsUI({
   panel: $('#panel'), state: S,
   onChange(key, v, final) {
     if (final) return;
-    delete S.__preset;
     const c = findControl(key);
     if (key === 'trackingMode') { setTrackingMode(v); }
     if (VISUAL_KEYS.has(key)) applyVisuals();
     if (key === 'hand3d' && v) ensure3D();
     if (key === 'renderScale' || key === 'videoFit') layout();
     if (key === 'keepAwake') updateWakeLock();
+    if (key === 'dataLog') v ? startDataLog() : stopDataLog();
     if (c?.reinit) scheduleReinit('model');
     if (c?.reinitCamera) scheduleReinit('camera');
     persist();
   },
   onAction(a, arg) {
-    if (a === 'preset') {
-      const p = PRESETS.find((x) => x.id === arg); if (!p) return;
-      Object.assign(S, p.values); S.__preset = p.id;
-      applyVisuals(); if (S.hand3d) ensure3D(); persist();
-      toast(`${p.name} profile applied`, 'ok', p.icon);
-    } else if (a === 'clearPaint') { overlay.clearPaint(); toast('Canvas cleared', 'ok', 'eraser'); }
+    if (a === 'exportFrame') { exportFrame(); }
     else if (a === 'reset') {
       const needReinit = ['handModel', 'delegate', 'numHands', 'armTracking', 'poseModel', 'detectConf', 'presenceConf', 'trackConf', 'trackingMode', 'objModel', 'objScore', 'objMax', 'faceMax', 'faceDetectConf', 'bodyPoseConf', 'bodyTrackConf'].some((k) => S[k] !== DEFAULTS[k]);
+      if (S.dataLog) stopDataLog(true);
       Object.keys(S).forEach((k) => delete S[k]); Object.assign(S, DEFAULTS);
       tracks = []; objTracks = []; faceTracks = []; poseSmoothed = null;
       applyVisuals(); layout(); persist(); ui.refresh(); if (needReinit) scheduleReinit('model');
@@ -633,6 +738,7 @@ const ui = new SettingsUI({
       saveBlob(new Blob([JSON.stringify(S, null, 2)], { type: 'application/json' }), 'kinesis-settings.json');
     } else if (a === 'importData') {
       for (const k of Object.keys(arg)) if (k in DEFAULTS) S[k] = arg[k];
+      if (S.dataLog) startDataLog();
       applyVisuals(); layout(); persist(); ui.refresh(); scheduleReinit('model'); if (S.hand3d) ensure3D();
       toast('Configuration imported', 'ok', 'folder-open');
     } else if (a === 'importError') toast('That file is not a valid configuration', 'warn', 'triangle-alert');
@@ -673,8 +779,7 @@ $('#btn-hide').addEventListener('click', () => setHidden(true));
 $('#btn-show').addEventListener('click', () => setHidden(false));
 $('#btn-pause').addEventListener('click', togglePause);
 $('#btn-3d').addEventListener('click', () => { S.hand3d = !S.hand3d; if (S.hand3d) ensure3D(); applyVisuals(); persist(); syncQuick(); ui.refresh(); toast(S.hand3d ? '3D hand on' : '3D hand off', 'ok', 'box'); });
-$('#btn-paint').addEventListener('click', () => { S.airPaint = !S.airPaint; persist(); syncQuick(); ui.refresh(); toast(S.airPaint ? 'Air paint on — pinch to draw' : 'Air paint off', 'ok', 'brush'); });
-function syncQuick() { $('#btn-3d').classList.toggle('on', !!S.hand3d); $('#btn-paint').classList.toggle('on', !!S.airPaint); }
+function syncQuick() { $('#btn-3d').classList.toggle('on', !!S.hand3d); }
 function togglePause() {
   paused = !paused;
   if (sourceKind === 'file') paused ? video.pause() : video.play();
@@ -696,8 +801,8 @@ window.addEventListener('keydown', (e) => {
   else if (k === 'p') capture();
   else if (k === 'r') toggleRecord();
   else if (k === 'f') toggleFullscreen();
-  else if (k === 'c') overlay.clearPaint();
   else if (k === 'm') { S.mirror = !S.mirror; applyVisuals(); persist(); }
+  else if (k === 'l') { S.dataLog = !S.dataLog; if (S.dataLog) startDataLog(); else stopDataLog(); persist(); ui.refresh(); }
   else if (k === '3') $('#btn-3d').click();
   else if (k === '1' || k === '2' || k === '4') {
     const m = { 1: 'hands', 2: 'body', 4: 'face' }[k];

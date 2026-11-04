@@ -29,17 +29,6 @@
 </script>
 </head>
 <body>
-<svg width="0" height="0" style="position:absolute" aria-hidden="true">
-  <filter id="thermal" color-interpolation-filters="sRGB">
-    <feColorMatrix type="matrix" values="0.3 0.59 0.11 0 0  0.3 0.59 0.11 0 0  0.3 0.59 0.11 0 0  0 0 0 1 0"/>
-    <feComponentTransfer>
-      <feFuncR type="table" tableValues="0.02 0.25 0.75 1 1 1"/>
-      <feFuncG type="table" tableValues="0.02 0.02 0.1 0.45 0.85 1"/>
-      <feFuncB type="table" tableValues="0.2 0.55 0.45 0.05 0.1 0.85"/>
-    </feComponentTransfer>
-  </filter>
-</svg>
-
 <main id="stage" aria-label="Camera view">
   <video id="video" playsinline muted autoplay></video>
   <div class="fx fx-grid-l" aria-hidden="true"></div>
@@ -69,7 +58,6 @@
   <div class="dock-group">
     <button class="dbtn" id="btn-pause" title="Pause (Space)" aria-label="Pause" data-icon="pause"></button>
     <button class="dbtn" id="btn-3d" title="3D hand (3)" aria-label="Toggle 3D hand" data-icon="box"></button>
-    <button class="dbtn" id="btn-paint" title="Air paint" aria-label="Toggle air paint" data-icon="brush"></button>
     <button class="dbtn" id="btn-flip" title="Switch camera" aria-label="Switch camera" data-icon="switch-camera"></button>
   </div>
   <button class="shutter" id="btn-shot" title="Capture still (P)" aria-label="Capture still"><span></span></button>

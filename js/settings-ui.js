@@ -1,5 +1,5 @@
 // Schema-driven settings panel.
-import { SCHEMA, PRESETS, DEFAULTS, VERSION } from './config.js';
+import { SCHEMA, DEFAULTS, VERSION } from './config.js';
 import { icon } from './icons.js';
 
 const fmt = (c, v) => {
@@ -18,7 +18,7 @@ const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&l
 export class SettingsUI {
   constructor({ panel, state, onChange, onAction }) {
     this.panel = panel; this.state = state; this.onChange = onChange; this.onAction = onAction;
-    this.tab = 'presets';
+    this.tab = 'tracking';
     this.rail = panel.querySelector('.rail');
     this.body = panel.querySelector('.panel-body');
     this.search = panel.querySelector('#settings-search');
@@ -71,8 +71,7 @@ export class SettingsUI {
       html = `<header class="tab-head"><div class="tab-ico">${icon(tab.icon)}</div><div><h2>${tab.label}</h2><p>${tabBlurb[tab.id] || ''}</p></div></header>`;
       for (const s of tab.sections) {
         if (!this.modeOK(s)) continue;
-        if (s.type === 'presets') html += this.presetsHTML();
-        else if (s.type === 'system') html += this.systemHTML();
+        if (s.type === 'system') html += this.systemHTML();
         else html += this.sectionHTML(s, s.controls.filter((c) => this.modeOK(c)));
       }
     }
@@ -132,22 +131,19 @@ export class SettingsUI {
         </div>`;
       case 'button':
         return `<div class="ctl" ${attrs}><button type="button" class="btn ghost wide" data-action="${c.key}">${icon(c.icon || 'zap')}<span>${esc(c.label)}</span></button></div>`;
+      case 'text': {
+        const ph = c.placeholder ? ` placeholder="${esc(c.placeholder)}"` : '';
+        return `<div class="ctl" ${attrs}>
+          <div class="lbl"><span>${esc(c.label)}</span>${desc}</div>
+          <div class="text-input"><input type="text" value="${esc(v == null ? '' : v)}"${ph} data-input="${c.key}" aria-label="${esc(c.label)}" autocomplete="off" spellcheck="false"></div>
+        </div>`;
+      }
     }
     return '';
   }
 
-  presetsHTML() {
-    return `<section class="presets">${PRESETS.map((p, i) => `
-      <button type="button" class="preset" data-preset="${p.id}" style="--a:${p.swatch[0]};--b:${p.swatch[1]};--d:${i * 40}ms">
-        <span class="preset-art">${icon(p.icon)}</span>
-        <span class="preset-meta"><b>${p.name}</b><small>${p.desc}</small></span>
-        <span class="preset-check">${icon('check')}</span>
-      </button>`).join('')}</section>
-      <p class="hint">${icon('info')} Presets change visuals only. Tracking and model settings are preserved.</p>`;
-  }
-
   systemHTML() {
-    const keys = [['S', 'Toggle settings'], ['H', 'Hide interface'], ['P', 'Capture still'], ['R', 'Start / stop recording'], ['F', 'Fullscreen'], ['C', 'Clear air paint'], ['M', 'Mirror view'], ['3', 'Toggle 3D hand']];
+    const keys = [['S', 'Toggle settings'], ['H', 'Hide interface'], ['P', 'Capture still'], ['R', 'Start / stop recording'], ['F', 'Fullscreen'], ['M', 'Mirror view'], ['1/2/9/4', 'Switch tracking mode'], ['3', 'Toggle 3D hand'], ['Space', 'Pause / resume']];
     return `
       <section class="card">
         <h3>Configuration</h3>
@@ -205,10 +201,6 @@ export class SettingsUI {
       b.parentElement.querySelectorAll('.sw').forEach((s) => s.classList.toggle('on', s === b));
       this.set(b.dataset.ckey, b.dataset.color);
     }));
-    B.querySelectorAll('[data-preset]').forEach((b) => b.addEventListener('click', () => {
-      B.querySelectorAll('[data-preset]').forEach((x) => x.classList.toggle('on', x === b));
-      this.onAction('preset', b.dataset.preset);
-    }));
     B.querySelectorAll('[data-action]').forEach((b) => b.addEventListener('click', () => {
       const a = b.dataset.action;
       if (a === 'import') { B.querySelector('#import-file').click(); return; }
@@ -219,9 +211,6 @@ export class SettingsUI {
       const f = file.files[0]; if (!f) return;
       try { this.onAction('importData', JSON.parse(await f.text())); } catch { this.onAction('importError'); }
     });
-    if (this.tab === 'presets') {
-      const active = this.state.__preset; if (active) B.querySelector(`[data-preset="${active}"]`)?.classList.add('on');
-    }
     this.onAction('rendered', this.tab);
   }
 
@@ -253,7 +242,6 @@ export class SettingsUI {
 }
 
 const tabBlurb = {
-  presets: 'One-tap visual profiles tuned for different looks.',
   tracking: 'What Kinesis tracks, the models behind it, and signal filtering.',
   skeleton: 'How bones, joints and colour are drawn.',
   body: 'Full-body skeleton, posture analysis and instrumentation.',
@@ -263,7 +251,8 @@ const tabBlurb = {
   model3d: 'A lit 3D hand rig fitted to your hand in real time.',
   arm: 'Pose-model arm bones joined to the wrist.',
   scene: 'Camera feed treatment and screen overlays.',
-  hud: 'Telemetry, labels, gestures and interface.',
+  hud: 'Telemetry, tactical instrumentation, gesture commands and interface.',
+  data: 'Frame export, landmark stream recording and capture settings.',
   system: 'Save, share and restore configurations.',
 };
 
