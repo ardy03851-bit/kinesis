@@ -72,9 +72,11 @@ export class Overlay2D {
       if (S.palmHud) this.drawPalmHud(S, hand, t);
       if (S.velocity) this.drawVelocity(S, hand);
       if (S.pinchLine) this.drawPinch(S, hand, t);
+      if (S.pointRay) this.drawRay(S, hand, t);
       if (S.crosshairs) this.drawCrosshairs(S, hand, t);
       if (S.bbox || S.handLabels) this.drawFrame(S, hand, t);
     }
+    if (S.spanGauge && scene.hands.length === 2) this.drawSpan(S, scene, t);
     this.drawTactical(S, scene, t);
     if (S.trackingMode === 'body' && scene.body) this.drawBody(S, scene, t);
     if (S.trackingMode === 'objects') this.drawObjects(S, scene, t);
@@ -537,6 +539,65 @@ export class Overlay2D {
     this.rrect(mx - w / 2, my - 8, w, 16, 8); ctx.fillStyle = 'rgba(6,9,10,0.8)'; ctx.fill();
     ctx.fillStyle = col; ctx.fillText(label, mx, my);
     if (hand.pinchStart) this.ripples.push({ x: mx, y: my, t0: t, col: S.secondary });
+  }
+
+  // designator ray — projects the index finger axis to the frame edge with a range readout
+  drawRay(S, hand, t) {
+    const { ctx } = this;
+    const a = hand.pts[5], b = hand.pts[8];
+    const dx = b.x - a.x, dy = b.y - a.y; const L = Math.hypot(dx, dy) || 1;
+    const ux = dx / L, uy = dy / L;
+    let far = 1e4;
+    if (ux > 1e-6) far = Math.min(far, (this.w - b.x) / ux); else if (ux < -1e-6) far = Math.min(far, -b.x / ux);
+    if (uy > 1e-6) far = Math.min(far, (this.h - b.y) / uy); else if (uy < -1e-6) far = Math.min(far, -b.y / uy);
+    if (!(far > 0)) far = 0;
+    const ex = b.x + ux * far, ey = b.y + uy * far;
+    const col = S.tacColor || S.accent;
+    const grad = ctx.createLinearGradient(b.x, b.y, ex, ey);
+    grad.addColorStop(0, rgba(col, 0.85)); grad.addColorStop(1, rgba(col, 0.05));
+    ctx.strokeStyle = grad; ctx.lineWidth = 1.2;
+    ctx.setLineDash([7, 5]);
+    ctx.beginPath(); ctx.moveTo(b.x, b.y); ctx.lineTo(ex, ey); ctx.stroke();
+    ctx.setLineDash([]);
+    this.shape('ring', b.x, b.y, 7, col);
+    const r = this.rangeCm(hand);
+    const label = `${r < 100 ? r.toFixed(1) : r.toFixed(0)} cm`;
+    const k = Math.min(110, far * 0.45);
+    const mx = b.x + ux * k, my = b.y + uy * k;
+    ctx.font = `600 10px ${MONO}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    const w = ctx.measureText(label).width + 10;
+    this.rrect(mx - w / 2, my - 8, w, 16, 8); ctx.fillStyle = 'rgba(6,9,10,0.8)'; ctx.fill();
+    ctx.fillStyle = col; ctx.fillText(label, mx, my);
+  }
+
+  // span caliper — projected distance between both index fingertips
+  drawSpan(S, scene, t) {
+    const { ctx } = this;
+    const [a, b] = scene.hands;
+    const p = a.pts[8], q = b.pts[8];
+    const col = S.tacColor || S.accent;
+    const dx = q.x - p.x, dy = q.y - p.y, L = Math.hypot(dx, dy) || 1;
+    const nx = -dy / L, ny = dx / L;
+    ctx.strokeStyle = rgba(col, 0.85); ctx.lineWidth = 1.2;
+    ctx.setLineDash([5, 4]);
+    ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(q.x, q.y); ctx.stroke();
+    ctx.setLineDash([]);
+    for (const pt of [p, q]) {
+      ctx.beginPath();
+      ctx.moveTo(pt.x - nx * 9, pt.y - ny * 9); ctx.lineTo(pt.x + nx * 9, pt.y + ny * 9);
+      ctx.stroke();
+    }
+    let mm = null;
+    if (a.world?.[8] && b.world?.[8]) {
+      const w1 = a.world[8], w2 = b.world[8];
+      mm = Math.hypot(w1.x - w2.x, w1.y - w2.y, w1.z - w2.z) * 1000;
+    }
+    const mx = (p.x + q.x) / 2, my = (p.y + q.y) / 2;
+    const label = mm != null ? `${mm.toFixed(0)} mm` : `${Math.round(L)} px`;
+    ctx.font = `600 10px ${MONO}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    const w = ctx.measureText(label).width + 10;
+    this.rrect(mx - w / 2, my - 8, w, 16, 8); ctx.fillStyle = 'rgba(6,9,10,0.8)'; ctx.fill();
+    ctx.fillStyle = col; ctx.fillText(label, mx, my);
   }
 
   // ---------------- arms ----------------

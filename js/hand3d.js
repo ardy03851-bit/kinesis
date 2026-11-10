@@ -6,6 +6,41 @@ import { HAND_BONES } from './geometry.js';
 // Joint radius as fraction of palm length (wrist → middle MCP)
 const JR = [0.2, 0.14, 0.12, 0.105, 0.09, 0.115, 0.1, 0.09, 0.08, 0.118, 0.102, 0.09, 0.08, 0.11, 0.096, 0.085, 0.076, 0.1, 0.086, 0.077, 0.07];
 const PALM_OUTLINE = [0, 1, 2, 5, 9, 13, 17];
+// finger chains (mcp, pip, dip, tip) used for the palmar/dorsal estimate
+const FINGER_CHAINS = [[5, 6, 7, 8], [9, 10, 11, 12], [13, 14, 15, 16], [17, 18, 19, 20], [1, 2, 3, 4]];
+const NAIL_TIPS = [[3, 4], [7, 8], [11, 12], [15, 16], [19, 20]];
+
+// Procedural skin: warm tone gradient, pores and subtle mottling, plus a
+// matching bump map so light catches the surface like real skin.
+function skinTexture() {
+  const S = 256;
+  const mk = () => { const c = document.createElement('canvas'); c.width = c.height = S; return c; };
+  const base = mk(), bump = mk();
+  const g = base.getContext('2d');
+  const grad = g.createLinearGradient(0, 0, S, S);
+  grad.addColorStop(0, '#e6b898'); grad.addColorStop(0.5, '#dba587'); grad.addColorStop(1, '#d0977a');
+  g.fillStyle = grad; g.fillRect(0, 0, S, S);
+  for (let i = 0; i < 3200; i++) {
+    const x = Math.random() * S, y = Math.random() * S, r = 0.3 + Math.random() * 1.3;
+    g.fillStyle = Math.random() < 0.5 ? 'rgba(122,72,56,0.05)' : 'rgba(255,224,204,0.05)';
+    g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.fill();
+  }
+  // faint tonal blotches
+  for (let i = 0; i < 26; i++) {
+    const x = Math.random() * S, y = Math.random() * S, r = 8 + Math.random() * 22;
+    const rg = g.createRadialGradient(x, y, 1, x, y, r);
+    rg.addColorStop(0, 'rgba(150,90,70,0.05)'); rg.addColorStop(1, 'rgba(150,90,70,0)');
+    g.fillStyle = rg; g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.fill();
+  }
+  const b = bump.getContext('2d');
+  b.fillStyle = '#808080'; b.fillRect(0, 0, S, S);
+  for (let i = 0; i < 4200; i++) {
+    const x = Math.random() * S, y = Math.random() * S, r = 0.3 + Math.random() * 1.1;
+    b.fillStyle = Math.random() < 0.5 ? 'rgba(255,255,255,0.10)' : 'rgba(0,0,0,0.10)';
+    b.beginPath(); b.arc(x, y, r, 0, Math.PI * 2); b.fill();
+  }
+  return { map: new THREE.CanvasTexture(base), bump: new THREE.CanvasTexture(bump) };
+}
 
 const fresnelVS = /* glsl */`
   varying vec3 vN; varying vec3 vWorld;
@@ -90,6 +125,8 @@ function fresnelMat(color, { power = 2.2, base = 0.1, opacity = 1, scan = 0, sid
 
 const UP = new THREE.Vector3(0, 1, 0);
 const _v = new THREE.Vector3(), _q = new THREE.Quaternion();
+// scratch vectors — every per-frame path reuses these instead of allocating
+const _v2 = new THREE.Vector3(), _v3 = new THREE.Vector3(), _v4 = new THREE.Vector3(), _v5 = new THREE.Vector3(), _v6 = new THREE.Vector3(), _v7 = new THREE.Vector3(), _v8 = new THREE.Vector3();
 
 function placeSegment(mesh, a, b, r, rz = r) {
   _v.subVectors(b, a);
@@ -129,6 +166,13 @@ class Rig {
     this.palm = new THREE.Mesh(this.palmGeo, owner.mat.palm); this.palm.frustumCulled = false;
     this.group.add(this.palm);
     this.pts = Array.from({ length: 21 }, () => new THREE.Vector3());
+    // Fingernails (skin style)
+    this.nails = [];
+    for (let i = 0; i < NAIL_TIPS.length; i++) {
+      const m = new THREE.Mesh(owner.geo.sph, owner.mat.nail); m.frustumCulled = false;
+      this.group.add(m); this.nails.push(m);
+    }
+    this.dorsal = new THREE.Vector3(0, 0, 1);
     // Forearm
     this.arm = {
       upper: new THREE.Mesh(owner.geo.cyl, owner.mat.body), fore: new THREE.Mesh(owner.geo.cyl, owner.mat.body),
@@ -146,6 +190,7 @@ class Rig {
     this.joints.forEach((m) => { m.material = M.joint; m.geometry = this.o.style === 'robot' ? G.servo : G.sph; });
     this.boneShells.forEach((m) => (m.material = M.shell));
     this.jointShells.forEach((m) => (m.material = M.shell));
+    this.nails.forEach((m) => (m.material = M.nail));
     this.palm.material = M.palm;
     this.arm.upper.material = M.body; this.arm.fore.material = M.body; this.arm.wristCap.material = M.body;
     this.arm.upper.geometry = segGeo; this.arm.fore.geometry = segGeo;
@@ -161,8 +206,8 @@ class Rig {
       P[i].set(p.x - W / 2, H / 2 - p.y, -hand.norm[i].z * hand.zScale * depth);
     }
     const palmLen = Math.max(8, P[0].distanceTo(P[9]));
-    const girth = S.hand3dThickness * (st === 'neon' ? 0.45 : st === 'xray' ? 0.42 : st === 'wire' ? 0.9 : 1);
-    const jointBoost = st === 'xray' ? 1.55 : st === 'robot' ? 1.1 : 1;
+    const girth = S.hand3dThickness * (st === 'neon' ? 0.45 : st === 'xray' ? 0.42 : st === 'wire' ? 0.9 : st === 'skin' ? 1.08 : 1);
+    const jointBoost = st === 'xray' ? 1.55 : st === 'robot' ? 1.1 : st === 'skin' ? 0.92 : 1;
     const shell = S.hand3dGlow || st === 'xray' || st === 'neon';
     const shellK = st === 'xray' ? 2.35 : 1.7;
 
@@ -188,20 +233,50 @@ class Rig {
       const s = this.jointShells[i]; s.visible = shell;
       if (shell) { s.position.copy(P[i]); s.scale.setScalar(r * shellK * (st === 'xray' ? 1 / jointBoost : 1)); }
     }
+    // Fingernails — dorsal side of each fingertip, oriented along the finger.
+    // The dorsal direction comes from the finger-curl geometry (works for both
+    // hands): the summed cross products of consecutive bone pairs point palmar,
+    // so the nails go on the opposite side.
+    const showNails = st === 'skin';
+    let sx = 0, sy = 0, sz = 0;
+    for (const [m, p, d, tp] of FINGER_CHAINS) {
+      const a = _v.subVectors(P[p], P[m]);
+      const b2 = _v2.subVectors(P[tp], P[d]);
+      const c = _v3.crossVectors(a, b2);
+      sx += c.x; sy += c.y; sz += c.z;
+    }
+    const curlMag = Math.hypot(sx, sy, sz);
+    if (curlMag > palmLen * 1.5) {
+      _v4.set(-sx, -sy, -sz).normalize();
+      this.dorsal.lerp(_v4, 0.35).normalize();
+    }
+    this.nails.forEach((n) => (n.visible = showNails));
+    if (showNails) {
+      NAIL_TIPS.forEach(([parent, tip], i) => {
+        const n = this.nails[i];
+        const dir = _v5.subVectors(P[tip], P[parent]).normalize();
+        const r = palmLen * JR[tip] * girth * 0.92;
+        n.position.copy(P[tip]).addScaledVector(dir, r * 0.55).addScaledVector(this.dorsal, r * 0.62);
+        _q.setFromUnitVectors(UP, dir);
+        n.quaternion.copy(_q);
+        n.scale.set(r * 0.78, r * 1.5, r * 0.3);
+      });
+    }
+
     // Palm slab
     this.palm.visible = st !== 'xray' && st !== 'neon';
     if (this.palm.visible) {
       const a = _v.subVectors(P[5], P[0]);
-      const b = new THREE.Vector3().subVectors(P[17], P[0]);
-      const nrm = new THREE.Vector3().crossVectors(a, b).normalize();
+      const b = _v2.subVectors(P[17], P[0]);
+      const nrm = _v3.crossVectors(a, b).normalize();
       const th = palmLen * 0.11 * girth;
       const n = PALM_OUTLINE.length;
-      const c = new THREE.Vector3();
+      const c = _v4.set(0, 0, 0);
       PALM_OUTLINE.forEach((id) => c.add(P[id])); c.divideScalar(n);
       const pos = this.palmPos;
       PALM_OUTLINE.forEach((id, i) => {
         // pull outline slightly toward centre so slab sits inside the bone tubes
-        const q = P[id].clone().lerp(c, 0.12);
+        const q = _v5.copy(P[id]).lerp(c, 0.12);
         pos[i * 3] = q.x + nrm.x * th; pos[i * 3 + 1] = q.y + nrm.y * th; pos[i * 3 + 2] = q.z + nrm.z * th;
         pos[(n + i) * 3] = q.x - nrm.x * th; pos[(n + i) * 3 + 1] = q.y - nrm.y * th; pos[(n + i) * 3 + 2] = q.z - nrm.z * th;
       });
@@ -217,9 +292,9 @@ class Rig {
     const showArm = !!(arm && S.arm3d);
     Object.values(A).forEach((m) => (m.visible = showArm));
     if (showArm) {
-      const toV = (p, z) => new THREE.Vector3(p.x - W / 2, H / 2 - p.y, z * depth);
-      const el = toV(arm.elbow, arm.ez), wr = P[0].clone();
-      const sh = arm.shoulder ? toV(arm.shoulder, arm.sz) : null;
+      const el = _v6.set(arm.elbow.x - W / 2, H / 2 - arm.elbow.y, arm.ez * depth);
+      const wr = _v7.copy(P[0]);
+      const sh = arm.shoulder ? _v8.set(arm.shoulder.x - W / 2, H / 2 - arm.shoulder.y, arm.sz * depth) : null;
       const rf = palmLen * 0.21 * S.hand3dThickness, ru = palmLen * 0.27 * S.hand3dThickness;
       const st2 = st === 'neon' || st === 'xray' ? 0.45 : 1;
       A.upper.visible = A.shoulder.visible = !!sh;
@@ -265,6 +340,66 @@ export class Hand3D {
     this.rigs = [];
     this.w = 1; this.h = 1;
     this.setStyle('mannequin', '#9fc9a6');
+
+    // orbit view — drag to rotate, wheel/pinch to zoom (see #gl.orbit CSS)
+    this.orbit = { on: false, yaw: 0, pitch: 0.18, zoom: 1, drag: null, pinch: null };
+    this.canvas.addEventListener('pointerdown', (e) => {
+      if (!this.orbit.on) return;
+      this.orbit.drag = { x: e.clientX, y: e.clientY };
+      this.canvas.setPointerCapture(e.pointerId);
+    });
+    this.canvas.addEventListener('pointermove', (e) => {
+      if (!this.orbit.on || !this.orbit.drag) return;
+      this.orbit.yaw -= (e.clientX - this.orbit.drag.x) * 0.005;
+      this.orbit.pitch = Math.max(-1.45, Math.min(1.45, this.orbit.pitch + (e.clientY - this.orbit.drag.y) * 0.005));
+      this.orbit.drag = { x: e.clientX, y: e.clientY };
+    });
+    const endDrag = () => (this.orbit.drag = null);
+    this.canvas.addEventListener('pointerup', endDrag);
+    this.canvas.addEventListener('pointercancel', endDrag);
+    this.canvas.addEventListener('wheel', (e) => {
+      if (!this.orbit.on) return;
+      e.preventDefault();
+      this.orbit.zoom = Math.max(0.35, Math.min(4, this.orbit.zoom * Math.exp(-e.deltaY * 0.0012)));
+    }, { passive: false });
+    this.canvas.addEventListener('touchstart', (e) => {
+      if (!this.orbit.on || e.touches.length !== 2) return;
+      const [a, b] = e.touches;
+      this.orbit.pinch = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+    }, { passive: true });
+    this.canvas.addEventListener('touchmove', (e) => {
+      if (!this.orbit.on || e.touches.length !== 2 || !this.orbit.pinch) return;
+      e.preventDefault();
+      const [a, b] = e.touches;
+      const d = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+      this.orbit.zoom = Math.max(0.35, Math.min(4, this.orbit.zoom * (d / this.orbit.pinch)));
+      this.orbit.pinch = d;
+    }, { passive: false });
+    this.canvas.addEventListener('touchend', () => (this.orbit.pinch = null), { passive: true });
+  }
+
+  setOrbit(on) {
+    if (this.orbit.on === !!on) return;
+    this.orbit.on = !!on;
+    if (!on) { this.orbit.yaw = 0; this.orbit.pitch = 0.18; this.orbit.zoom = 1; }
+    this.applyCam();
+  }
+
+  applyCam() {
+    const o = this.orbit;
+    if (!o.on) {
+      this.camera.position.set(0, 0, 3000);
+      this.camera.up.set(0, 1, 0);
+      this.camera.lookAt(0, 0, 0);
+      this.camera.zoom = 1;
+    } else {
+      const d = 3000, cp = Math.cos(o.pitch);
+      this.camera.position.set(d * cp * Math.sin(o.yaw), d * Math.sin(o.pitch), d * cp * Math.cos(o.yaw));
+      this.camera.up.set(0, 1, 0);
+      this.camera.lookAt(0, 0, 0);
+      this.camera.zoom = o.zoom;
+    }
+    this.camera.updateProjectionMatrix();
   }
 
   resize(w, h, dpr) {
@@ -282,7 +417,7 @@ export class Hand3D {
     Object.values(this.mat).forEach((m) => m.dispose?.());
     const T = new THREE.Color(tint);
     const std = (o) => new THREE.MeshStandardMaterial(o);
-    let body, joint, palm, shell;
+    let body, joint, palm, nail, shell;
     switch (style) {
       case 'chrome':
         body = std({ color: 0xffffff, metalness: 1, roughness: 0.06, envMapIntensity: 1.4 });
@@ -357,14 +492,35 @@ export class Hand3D {
         });
         joint = body; palm = body; break;
       }
+      case 'skin': {
+        // Casual realism: procedural skin tone with pores, a sheen term for the
+        // soft back-scatter of light through skin, and translucent nails.
+        const { map, bump } = skinTexture();
+        body = new THREE.MeshPhysicalMaterial({
+          color: 0xffffff, map, bumpMap: bump, bumpScale: 0.5,
+          roughness: 0.55, metalness: 0,
+          sheen: 0.4, sheenColor: new THREE.Color(0xffd9c4), sheenRoughness: 0.55,
+          clearcoat: 0.08, clearcoatRoughness: 0.6,
+          envMapIntensity: 0.55,
+        });
+        joint = body; palm = body;
+        nail = new THREE.MeshPhysicalMaterial({
+          color: 0xe9d2c8, roughness: 0.28, metalness: 0,
+          transmission: 0.25, thickness: 0.4, ior: 1.4,
+          clearcoat: 1, clearcoatRoughness: 0.12,
+          envMapIntensity: 0.8,
+        });
+        break;
+      }
       default: // mannequin
         body = std({ color: 0xd8d2c8, roughness: 0.58, metalness: 0.0, envMapIntensity: 0.6 });
         joint = body;
         palm = std({ color: 0xd2ccc2, roughness: 0.62, metalness: 0.0, envMapIntensity: 0.6 });
     }
+    if (!nail) nail = std({ color: 0xe8cfc4, roughness: 0.35, metalness: 0.0, envMapIntensity: 0.7, clearcoat: 0.6, clearcoatRoughness: 0.25 });
     shell = fresnelMat(style === 'xray' ? 0x6fa8ff : T, { power: style === 'xray' ? 2.6 : 3.2, base: 0.0, opacity: style === 'xray' ? 0.55 : 0.8, side: THREE.BackSide });
-    this.mat = { body, joint, palm, shell };
-    this.baseOpacity = new Map([[body, body.opacity ?? 1], [joint, joint.opacity ?? 1], [palm, palm.opacity ?? 1], [shell, 1]]);
+    this.mat = { body, joint, palm, nail, shell };
+    this.baseOpacity = new Map([[body, body.opacity ?? 1], [joint, joint.opacity ?? 1], [palm, palm.opacity ?? 1], [nail, nail.opacity ?? 1], [shell, 1]]);
     this.rigs.forEach((r) => r.applyMaterials());
   }
 
@@ -381,6 +537,7 @@ export class Hand3D {
     this.visible = true;
     this.setStyle(S.hand3dStyle, S.hand3dTint);
     this.setOpacity(S.hand3dOpacity);
+    if (this.orbit.on) this.applyCam();
     const t = scene.t * 0.001;
     for (const m of Object.values(this.mat)) if (m.uniforms?.uTime) m.uniforms.uTime.value = t;
     const k = S.lightIntensity;

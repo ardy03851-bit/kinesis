@@ -4,7 +4,7 @@ A real-time optical tracking instrument that runs entirely in the browser. Point
 
 Live: https://ardy03851-bit.github.io/kinesis/
 
-Kinesis starts tracking the moment it opens — no start screen, no buttons to find. If it is your first visit, a short training coach walks you through showing a hand, making a gesture and pinching, and badges mark your milestones. All of the playful commentary can be switched off in Settings › HUD › Interface for a strictly professional instrument.
+Kinesis starts tracking the moment it opens — no start screen, no buttons to find. The interface is a minimal, professional instrument: a dock, a telemetry panel and a settings panel, nothing else on screen.
 
 ## Tracking modes
 
@@ -27,7 +27,14 @@ What Kinesis tracks is switchable at any time (Tracking › What to track, or ke
 ### Tactical layer
 - Boresight reticle in three styles (mil-dot, cross, ring) with adjustable size
 - Bearing tape, rangefinder, target designator with lock-on and AZ/EL readout
+- Designator ray: laser projection along the index finger with a live range readout
+- Span caliper: projected distance between both index fingertips, in millimetres
 - Contact radar with configurable size, range rings and sweep; rule-of-thirds and centre-cross grid styles; scanlines, vignette, dim, frame HUD
+
+### Motion capture
+- Rolling motion capture buffer (2–30 s, configurable) of full tracking state
+- Review timeline: scrub, frame-step and loop-play any captured moment over the live feed
+- One-click JSON export of the captured window (timestamps, handedness, gesture, 21 landmarks per hand per frame)
 
 ### Data
 - CSV telemetry stream at configurable sample rate (per mode: hands / body / objects / face), toggled with the L key
@@ -39,15 +46,14 @@ What Kinesis tracks is switchable at any time (Tracking › What to track, or ke
 - Thumbs-up-and-hold (1 s) toggles recording
 
 ### 3D and face
-- 3D hand rig (three.js) in 19 materials: mannequin, hologram, robot, x-ray, glass, wireframe, neon, ghost, chrome, gold, carbon fibre, obsidian, titanium, graphite, aerogel, jade, plasma, void, wood — with optional 3D forearm
+- 3D hand rig (three.js) in 20 materials: mannequin, skin (procedural tone with pores and translucent fingernails), hologram, robot, x-ray, glass, wireframe, neon, ghost, chrome, gold, carbon fibre, obsidian, titanium, graphite, aerogel, jade, plasma, void, wood — with optional 3D forearm
+- Orbit view: drag to rotate the 3D rig around the scene, wheel or pinch to zoom
 - Face: gaze readout, blink tally, expression telemetry; objects: dashed trajectory prediction with lead ghost box
 
 ### Interface
 - Boots straight into live tracking — the camera starts automatically, with a narrated startup HUD and a recovery card if access is denied
-- First-run training coach: three steps that complete themselves by watching you show a hand, make a gesture and pinch
-- Achievement badges (first contact, gesture master, photographer, director, explorer, marathon, high five, certified operator)
-- Playful commentary mode (on by default) with a serious-mode switch in Settings › HUD › Interface
-- Session telemetry: live session timer and gesture counter in the telemetry panel
+- Minimal chrome: no title bar, no status chips — just the dock, telemetry panel and settings
+- Session telemetry: live session timer, gesture counter and wrist-speed readout in the telemetry panel
 - Searchable settings panel with export / import / share-link of settings
 - Soft-machine UI: capsule controls, rounded glass panels and rounded on-canvas HUD chips and panels — no hard squares
 - Installable PWA with a proper home-screen icon set (SVG + 192/512 PNG + maskable, full-bleed apple-touch-icon)

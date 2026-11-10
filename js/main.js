@@ -1,5 +1,5 @@
 // Kinesis — app controller.
-import { DEFAULTS, STORAGE_KEY, SCHEMA } from './config.js';
+import { DEFAULTS, STORAGE_KEY, SCHEMA, VERSION } from './config.js';
 import { hydrateIcons, icon } from './icons.js';
 import { Tracker } from './tracker.js';
 import { HandFilter, OneEuro, GestureStabiliser, analyseHand, mlGestureName, dist3, clamp, jointAngle } from './geometry.js';
@@ -38,44 +38,11 @@ function toast(msg, kind = 'info', ic = 'info') {
   el.className = `toast ${kind}`;
   el.innerHTML = `${icon(ic)}<span>${msg}</span>`;
   $('#toasts').appendChild(el);
-  const life = kind === 'award' ? 4200 : 2600;
-  setTimeout(() => { el.classList.add('out'); setTimeout(() => el.remove(), 400); }, life);
-}
-
-// ---------------- personality ----------------
-// Kinesis keeps its instrumentation dead serious, but talks like an
-// over-enthusiastic lab assistant. `S.playful` switches the voice.
-const QUIPS = {
-  searching: ['Scanning for hands…', 'Where did your hands go?', 'Wave at the camera. Go on.', 'Still looking… don\u2019t be shy.'],
-  tracking: ['Locked on. Very impressive.', 'Nailed it.', 'Hands: found. Science: happening.', 'Gotcha.'],
-  greet: ['Tracking online — wiggle those fingers', 'All systems awake. Show me a hand.'],
-};
-function pick(list) { return list[Math.floor(Math.random() * list.length)]; }
-function quip(kind, fallback) { return S.playful ? pick(QUIPS[kind]) : fallback; }
-
-// ---------------- badges ----------------
-const BADGES = {
-  'first-hand': { label: 'First contact', desc: 'A hand appeared. Historic.', ic: 'hand' },
-  'first-gesture': { label: 'Gesture master', desc: 'First gesture recognised.', ic: 'sparkles' },
-  'first-capture': { label: 'Photographer', desc: 'First still captured.', ic: 'aperture' },
-  'first-recording': { label: 'Director', desc: 'First recording saved.', ic: 'video' },
-  'explorer': { label: 'Explorer', desc: 'Tried all four tracking modes.', ic: 'scan-search' },
-  'graduate': { label: 'Certified operator', desc: 'Completed training mode.', ic: 'graduation-cap' },
-  'marathon': { label: 'Marathon', desc: 'Five minutes of continuous tracking.', ic: 'timer' },
-  'high-five': { label: 'High five', desc: 'Two hands, one celebration.', ic: 'party-popper' },
-};
-let badgeSet = new Set();
-try { badgeSet = new Set(JSON.parse(localStorage.getItem('kinesis.badges') || '[]')); } catch {}
-function awardBadge(key) {
-  if (badgeSet.has(key) || !S.playful) return;
-  const b = BADGES[key]; if (!b) return;
-  badgeSet.add(key);
-  try { localStorage.setItem('kinesis.badges', JSON.stringify([...badgeSet])); } catch {}
-  toast(`<b>Badge earned — ${b.label}</b><span> · ${b.desc}</span>`, 'award', b.ic);
+  setTimeout(() => { el.classList.add('out'); setTimeout(() => el.remove(), 400); }, 2600);
 }
 
 // ---------------- session stats ----------------
-const session = { startedAt: 0, gestures: 0, highFived: 0, modesTried: new Set(), lastHighFive: 0 };
+const session = { startedAt: 0, gestures: 0, modesTried: new Set() };
 
 // ---------------- layout / mapping ----------------
 const L = { w: 1, h: 1, vw: 1280, vh: 720, s: 1, ox: 0, oy: 0, dpr: 1 };
@@ -122,6 +89,10 @@ function applyVisuals() {
   c3d.classList.toggle('hidden', !S.hand3d);
   const handsOnly = S.trackingMode === 'hands';
   $('#btn-3d').classList.toggle('hidden', !handsOnly);
+  // orbit view: canvas takes pointer input for camera control
+  const orbit = !!S.hand3d && !!S.hand3dOrbit;
+  c3d.classList.toggle('orbit', orbit);
+  hand3d?.setOrbit?.(orbit);
 }
 
 // ---------------- camera ----------------
@@ -147,10 +118,13 @@ function waitForDims() {
     video.addEventListener('loadedmetadata', f); setTimeout(res, 3000);
   });
 }
+let videoFileURL = null;
 async function useVideoFile(file) {
   stopStream();
   video.srcObject = null;
-  video.src = URL.createObjectURL(file);
+  if (videoFileURL) { URL.revokeObjectURL(videoFileURL); videoFileURL = null; }
+  videoFileURL = URL.createObjectURL(file);
+  video.src = videoFileURL;
   video.loop = true; video.muted = true;
   sourceKind = 'file';
   await video.play();
@@ -186,7 +160,6 @@ function ingest(res, now) {
     if (used.has(di)) return;
     const t = { id: nextId++, filter: new HandFilter(), stab: new GestureStabiliser(7), missing: 0, pinching: false, lastToast: 0, gesture: 'Unknown' };
     tracks.push(t); update(t, d, now);
-    if (t.norm) awardBadge('first-hand');
   });
   tracks.forEach((t, ti) => { if (!tUsed.has(ti) && !t.fresh) t.missing++; t.fresh = false; });
   tracks = tracks.filter((t) => t.missing <= S.holdFrames);
@@ -281,26 +254,34 @@ function update(t, d, now) {
   a.pinching = t.pinching;
   t.pinchStart = !wasPinch && t.pinching;
   t.analysis = a;
+  // wrist speed in m/s from world landmarks (for the telemetry panel)
+  if (d.world) {
+    const w0 = d.world[0];
+    if (t.prevWrist) {
+      const dts = Math.max(0.004, (now - t.prevT) / 1000);
+      const v = dist3(w0, t.prevWrist) / dts;
+      t.speed = t.speed == null ? v : t.speed * 0.6 + v * 0.4;
+    }
+    t.prevWrist = { x: w0.x, y: w0.y, z: w0.z }; t.prevT = now;
+  } else { t.prevWrist = null; t.speed = null; }
   t.pinchMM = d.world ? dist3(d.world[4], d.world[8]) * 1000 : null;
   let label = a.gesture;
   if (d.mlGesture && d.mlGesture.name !== 'None' && d.mlGesture.score > 0.55) label = mlGestureName(d.mlGesture.name);
   else if (a.pinching && a.gesture !== 'OK') label = 'Pinch';
   const prev = t.gesture;
   t.gesture = t.stab.push(label);
-  if (t.gesture !== prev && t.gesture !== 'Unknown') { session.gestures++; awardBadge('first-gesture'); }
+  if (t.gesture !== prev && t.gesture !== 'Unknown') session.gestures++;
   if (S.gestures && S.gestureToast && t.gesture !== prev && t.gesture !== 'Unknown' && now - t.lastToast > 1100) {
     t.lastToast = now; gestureFlash(t);
   }
 }
 
 const GESTURE_ICON = { 'Open palm': 'hand', Fist: 'circle-dot', Point: 'pointer', Peace: 'git-branch', 'Thumbs up': 'check', 'Thumbs down': 'triangle-alert', Rock: 'hand-metal', Love: 'sparkles', OK: 'circle-gauge', Pinch: 'mouse-pointer-click', 'Call me': 'smartphone', Three: 'layers', Four: 'grid-3x3', 'L-shape': 'scan', Thumb: 'hand' };
-const GESTURE_QUIP = { 'Open palm': 'Hello there.', Fist: 'Solid grip.', Peace: 'Peace, indeed.', 'Thumbs up': 'Two thumbs way up.', Rock: 'Very rock and roll.', Love: 'Feeling the love.', OK: 'A-OK.', Pinch: 'A delicate pinch.', 'Thumbs down': 'Harsh, but noted.', 'Call me': 'Ring ring.', Point: 'Right over there.' };
 let gestureTimer = 0;
 function gestureFlash(t) {
   const el = $('#gesture');
   const hand = t.handedness === 'Unknown' ? '' : (S.swapHands ? (t.handedness === 'Left' ? 'Right' : 'Left') : t.handedness) + ' hand';
-  const quipTxt = S.playful && GESTURE_QUIP[t.gesture] ? GESTURE_QUIP[t.gesture] : hand;
-  el.innerHTML = `${icon(GESTURE_ICON[t.gesture] || 'hand')}<b>${t.gesture}</b><span>${quipTxt}</span>`;
+  el.innerHTML = `${icon(GESTURE_ICON[t.gesture] || 'hand')}<b>${t.gesture}</b><span>${hand}</span>`;
   el.classList.remove('show'); void el.offsetWidth; el.classList.add('show');
   clearTimeout(gestureTimer); gestureTimer = setTimeout(() => el.classList.remove('show'), 1400);
 }
@@ -420,12 +401,19 @@ function loop() {
   }
 
   const scene = buildModeScene(buildScene(now, dt));
-  overlay.render(S, scene);
-  if (hand3d) hand3d.render(S, scene);
 
-  checkHighFive(now, scene);
-  coachTick(now, scene);
-  if (session.startedAt && now - session.startedAt > 5 * 60 * 1000) awardBadge('marathon');
+  // motion capture buffer (scene objects are rebuilt fresh each frame, safe to keep by reference)
+  if (S.motionCapture && !paused) {
+    motion.buf.push({ t: now, scene });
+    const win = S.motionWindow * 1000;
+    while (motion.buf.length && now - motion.buf[0].t > win) motion.buf.shift();
+  }
+  motionUI(now);
+
+  if (!motion.review) {
+    overlay.render(S, scene);
+    if (hand3d) hand3d.render(S, scene);
+  }
 
   if (captureReq) { const r = captureReq; captureReq = null; r(composite()); }
   if (recorder && recorder.state === 'recording') composite(recCanvas, recCtx);
@@ -456,13 +444,16 @@ function updateTelemetry(now, scene) {
     hands: () => {
       $('#t-gesture').textContent = S.gestures ? (scene.hands.map((h) => h.gesture).filter((g) => g !== 'Unknown').join(' / ') || '—') : 'off';
       $('#t-pinch').textContent = scene.hands[0]?.pinchMM != null ? scene.hands[0].pinchMM.toFixed(0) + ' mm' : '—';
+      const sp = scene.hands.map((h) => tracks.find((t) => t.id === h.id)?.speed).filter((v) => v != null);
+      $('#t-speed').textContent = sp.length ? (sp.reduce((a, b) => a + b, 0) / sp.length).toFixed(2) + ' m/s' : '—';
       $('#t-arm').textContent = !S.armTracking ? 'off' : scene.arms.filter((a) => !a.estimated).length ? scene.arms.filter((a) => !a.estimated).map((a) => `${a.side} ${Math.round(a.angle)}°`).join(' · ') : 'searching';
     },
     body: () => {
       const B = scene.body;
-      if (!B) { $('#t-gesture').textContent = '—'; $('#t-pinch').textContent = '—'; $('#t-arm').textContent = '—'; return; }
+      if (!B) { $('#t-gesture').textContent = '—'; $('#t-pinch').textContent = '—'; $('#t-speed').textContent = '—'; $('#t-arm').textContent = '—'; return; }
       const P = B.lm;
       $('#t-gesture').textContent = 'tracking';
+      $('#t-speed').textContent = '—';
       const mSh = { x: (P[11].x + P[12].x) / 2, y: (P[11].y + P[12].y) / 2 };
       const mHp = { x: (P[23].x + P[24].x) / 2, y: (P[23].y + P[24].y) / 2 };
       $('#t-pinch').textContent = (Math.atan2(mSh.x - mHp.x, mHp.y - mSh.y) * 180 / Math.PI).toFixed(0) + '° lean';
@@ -474,12 +465,14 @@ function updateTelemetry(now, scene) {
       const cls = [...new Set(scene.objects.map((o) => o.cls))];
       $('#t-gesture').textContent = n ? `${n} contact${n > 1 ? 's' : ''}` : '—';
       $('#t-pinch').textContent = n ? `${cls.length} class${cls.length > 1 ? 'es' : ''}` : '—';
+      $('#t-speed').textContent = n ? (Math.hypot(scene.objects[0].vx, scene.objects[0].vy) * 100).toFixed(0) + ' cm/s' : '—';
       $('#t-arm').textContent = n ? scene.objects[0].cls : '—';
     },
     face: () => {
       const n = faceTracks.length;
       const f = faceTracks[0];
       $('#t-gesture').textContent = n ? `${n} face${n > 1 ? 's' : ''}` : '—';
+      $('#t-speed').textContent = '—';
       if (f?.blend) {
         const top = f.blend.filter((c) => c.categoryName !== '_neutral').sort((a, b) => b.score - a.score)[0];
         $('#t-pinch').textContent = top ? top.categoryName : '—';
@@ -491,7 +484,6 @@ function updateTelemetry(now, scene) {
     },
   };
   (modeRows[S.trackingMode] || modeRows.hands)();
-  $('#chip-fps').textContent = `${stats.renderFps.toFixed(0)} FPS`;
   if (session.startedAt) {
     const s = Math.max(0, Math.floor((now - session.startedAt) / 1000));
     $('#t-session').textContent = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
@@ -500,11 +492,8 @@ function updateTelemetry(now, scene) {
   const n = S.trackingMode === 'objects' ? scene.objects.length : S.trackingMode === 'face' ? faceTracks.length : scene.hands.length;
   const label = { hands: 'hand', body: 'body', objects: 'contact', face: 'face' }[S.trackingMode] || 'contact';
   const searching = S.trackingMode === 'body' ? !scene.body : n === 0;
-  const searchMsg = S.playful
-    ? (S.trackingMode === 'hands' ? stickyQuip('searching', now) : `Searching for ${label}s…`)
-    : `Searching`;
-  const trackMsg = S.playful && n === 1 && S.trackingMode === 'hands' ? `Tracking 1 hand — ${stickyQuip('tracking', now)}` : `Tracking ${n} ${label}${n > 1 ? 's' : ''}`;
-  setStatus(paused ? 'paused' : searching ? 'search' : 'tracking', paused ? 'Paused' : searching ? searchMsg : trackMsg);
+  const trackMsg = `Tracking ${n} ${label}${n > 1 ? 's' : ''}`;
+  setStatus(paused ? 'paused' : searching ? 'search' : 'tracking', paused ? 'Paused' : searching ? `Searching` : trackMsg);
   drawSpark();
 }
 
@@ -528,15 +517,12 @@ function drawSpark() {
 }
 
 let statusKind = '';
-let quipHold = { text: '', until: 0 };
-function stickyQuip(kind, now) {
-  if (now > quipHold.until || quipHold.kind !== kind) { quipHold = { kind, text: pick(QUIPS[kind]), until: now + 5000 }; }
-  return quipHold.text;
-}
 function setStatus(kind, text) {
-  const chip = $('#status');
-  if (statusKind !== kind) { chip.dataset.state = kind; statusKind = kind; }
-  chip.querySelector('span').textContent = text;
+  statusKind = kind;
+  // boot HUD while it is on screen, otherwise the telemetry state row
+  if (bootHud.classList.contains('show')) bootMsg.textContent = text;
+  const row = $('#t-state');
+  if (row) row.textContent = text;
 }
 
 // ---------------- capture & record ----------------
@@ -572,7 +558,7 @@ async function saveBlob(blob, name) {
 function capture() {
   if (!running) return;
   $('#flash').classList.remove('go'); void $('#flash').offsetWidth; $('#flash').classList.add('go');
-  captureReq = (cv) => cv.toBlob((b) => { if (b) { saveBlob(b, `kinesis-${Date.now()}.png`); toast(S.playful ? 'Snap! Still captured.' : 'Still captured', 'ok', 'aperture'); awardBadge('first-capture'); } }, 'image/png');
+  captureReq = (cv) => cv.toBlob((b) => { if (b) { saveBlob(b, `kinesis-${Date.now()}.png`); toast('Still captured', 'ok', 'aperture'); } }, 'image/png');
 }
 function toggleRecord() {
   if (!running) return;
@@ -591,8 +577,7 @@ function toggleRecord() {
     btn.classList.remove('recording'); $('#rec-pill').classList.remove('show');
     const blob = new Blob(chunks, { type: recorder.mimeType || 'video/webm' });
     saveBlob(blob, `kinesis-${Date.now()}.${(recorder.mimeType || '').includes('mp4') ? 'mp4' : 'webm'}`);
-    toast(S.playful ? 'Recording saved — future you will thank present you.' : 'Recording saved', 'ok', 'video'); recorder = null;
-    awardBadge('first-recording');
+    toast('Recording saved', 'ok', 'video'); recorder = null;
   };
   recorder.start(250);
   btn.classList.add('recording'); $('#rec-pill').classList.add('show');
@@ -660,7 +645,7 @@ function sampleDataLog(now) {
 function exportFrame() {
   if (!running) { toast('Start tracking first', 'warn', 'triangle-alert'); return; }
   const frame = {
-    app: 'Kinesis', version: '4.0.0', captured: new Date().toISOString(),
+    app: 'Kinesis', version: VERSION, captured: new Date().toISOString(),
     mode: S.trackingMode, video: { width: L.vw, height: L.vh, mirrored: !!S.mirror },
     stats: { renderFps: +stats.renderFps.toFixed(1), inferHz: +stats.inferHz.toFixed(1), inferenceMs: +stats.ms.toFixed(1) },
   };
@@ -678,20 +663,76 @@ function exportFrame() {
   toast('Frame exported', 'ok', 'download');
 }
 
-// ---------------- high five ----------------
-// Two open palms brought close together earn a celebration. Purely scientific.
-function checkHighFive(now, scene) {
-  if (!S.playful || S.trackingMode !== 'hands' || paused) return;
-  if (scene.hands.length < 2 || now - session.lastHighFive < 4000) return;
-  const [a, b] = scene.hands;
-  if (a.gesture !== 'Open palm' || b.gesture !== 'Open palm') return;
-  const d = Math.hypot(a.pts[0].x - b.pts[0].x, a.pts[0].y - b.pts[0].y);
-  if (d < Math.max(a.palmPx, b.palmPx) * 1.6) {
-    session.lastHighFive = now; session.highFived++;
-    toast('High five! Great teamwork.', 'ok', 'party-popper');
-    awardBadge('high-five');
-  }
+// ---------------- motion capture & review ----------------
+// A rolling buffer of the last N seconds of scene state. Scrub the timeline to
+// replay any moment, step frame-by-frame, or export the capture as JSON.
+const motion = { buf: [], review: false, playing: false, pos: 1 };
+const tlEl = $('#timeline'), tlRange = $('#tl-range'), tlTime = $('#tl-time'), tlPlay = $('#tl-play');
+function motionSpan() {
+  const b = motion.buf;
+  return b.length > 1 ? b[b.length - 1].t - b[0].t : 0;
 }
+function motionUI(now) {
+  if (!S.motionCapture) {
+    motion.buf = [];
+    if (motion.review) motionExit();
+    tlEl.hidden = true;
+    return;
+  }
+  tlEl.hidden = motion.buf.length < 2;
+  if (tlEl.hidden || !motion.review) return;
+  if (motion.playing) {
+    const span = motionSpan();
+    if (span > 0) {
+      motion.pos += (now - (motion.lastT || now)) / span;
+      if (motion.pos > 1) motion.pos = 0; // loop
+    }
+  }
+  motion.lastT = now;
+  const b = motion.buf;
+  const idx = Math.min(b.length - 1, Math.max(0, Math.round(motion.pos * (b.length - 1))));
+  const f = b[idx];
+  overlay.render(S, f.scene);
+  if (hand3d) hand3d.render(S, f.scene);
+  if (!motion.scrubbing) tlRange.value = String(Math.round(motion.pos * 1000));
+  tlTime.textContent = `-${((now - f.t) / 1000).toFixed(1)}s`;
+}
+function motionExit() {
+  motion.review = false; motion.playing = false; motion.pos = 1;
+  tlTime.textContent = 'LIVE';
+  tlTime.classList.remove('review');
+  tlPlay.innerHTML = icon('play');
+}
+tlRange.addEventListener('pointerdown', () => (motion.scrubbing = true));
+tlRange.addEventListener('pointerup', () => (motion.scrubbing = false));
+tlRange.addEventListener('input', () => {
+  motion.review = true; motion.playing = false;
+  motion.pos = +tlRange.value / 1000;
+  tlTime.classList.add('review');
+  tlPlay.innerHTML = icon('play');
+});
+tlPlay.addEventListener('click', () => {
+  if (!motion.review) { motion.review = true; motion.pos = 0; motion.playing = true; }
+  else motion.playing = !motion.playing;
+  tlTime.classList.toggle('review', motion.review);
+  tlPlay.innerHTML = icon(motion.playing ? 'pause' : 'play');
+});
+$('#tl-live').addEventListener('click', motionExit);
+$('#tl-export').addEventListener('click', () => {
+  const b = motion.buf;
+  if (b.length < 2) { toast('Nothing captured yet', 'warn', 'triangle-alert'); return; }
+  const t0 = b[0].t;
+  const frames = b.map((f) => ({
+    t: +(f.t - t0).toFixed(1),
+    hands: f.scene.hands.map((h) => ({
+      id: h.id, handedness: h.handedness, gesture: h.gesture,
+      landmarks: h.norm.map((p) => [+p.x.toFixed(5), +p.y.toFixed(5), +p.z.toFixed(5)]),
+    })),
+  }));
+  const out = { app: 'Kinesis', version: VERSION, exported: new Date().toISOString(), window_s: S.motionWindow, fps: +(stats.renderFps || 0).toFixed(1), frames };
+  saveBlob(new Blob([JSON.stringify(out)], { type: 'application/json' }), `kinesis-motion-${Date.now()}.json`);
+  toast(`Motion capture exported · ${frames.length} frames`, 'ok', 'download');
+});
 
 // ---------------- gesture commands ----------------
 const cmdState = { pinchSince: 0, thumbsSince: 0, pinchDone: false, thumbsDone: false };
@@ -770,15 +811,13 @@ function scheduleReinit(kind) {
 }
 
 // ---------------- settings ----------------
-const VISUAL_KEYS = new Set(['mirror', 'videoDim', 'videoBlur', 'grid', 'gridStyle', 'scanlines', 'vignette', 'frameHud', 'scanSweep', 'uiAccent', 'reduceMotion', 'telemetry', 'fpsGraph', 'hand3d', 'hand3dShadow']);
+const VISUAL_KEYS = new Set(['mirror', 'videoDim', 'videoBlur', 'grid', 'gridStyle', 'scanlines', 'vignette', 'frameHud', 'scanSweep', 'uiAccent', 'reduceMotion', 'telemetry', 'fpsGraph', 'hand3d', 'hand3dShadow', 'hand3dOrbit']);
 function setTrackingMode(v) {
   S.trackingMode = v;
   tracks = []; objTracks = []; faceTracks = []; poseSmoothed = null;
   applyVisuals(); ui.refresh();
   session.modesTried.add(v);
-  if (session.modesTried.size >= 4) awardBadge('explorer');
-  const MODE_MSG = { hands: 'Hands it is. Show me what you\u2019ve got.', body: 'Full-body mode — stand back a little.', objects: 'Object hunt: everything in frame is a suspect.', face: 'Face mode. Try not to blink… actually, do. It counts them.' };
-  toast(S.playful ? (MODE_MSG[v] || `Tracking mode: ${v}`) : `Tracking mode: ${v}`, 'ok', 'cpu');
+  toast(`Tracking mode: ${v}`, 'ok', 'cpu');
 }
 
 const ui = new SettingsUI({
@@ -798,6 +837,7 @@ const ui = new SettingsUI({
   },
   onAction(a, arg) {
     if (a === 'exportFrame') { exportFrame(); }
+    else if (a === 'motionExport') { $('#tl-export').click(); }
     else if (a === 'loadFile') { $('#file-input').click(); }
     else if (a === 'reset') {
       const needReinit = ['handModel', 'delegate', 'numHands', 'armTracking', 'poseModel', 'detectConf', 'presenceConf', 'trackConf', 'trackingMode', 'objModel', 'objScore', 'objMax', 'faceMax', 'faceDetectConf', 'bodyPoseConf', 'bodyTrackConf'].some((k) => S[k] !== DEFAULTS[k]);
@@ -889,8 +929,7 @@ window.addEventListener('keydown', (e) => {
 
 // ---------------- boot ----------------
 // No landing menu: Kinesis boots straight into live tracking. The boot HUD
-// narrates startup in the top bar, a gate card appears if the camera refuses,
-// and first-time visitors get a playful training coach.
+// narrates startup, a gate card appears if the camera refuses.
 const bootHud = $('#boot-hud'), bootMsg = $('#boot-msg'), bootFill = $('#boot-fill');
 let bootStep = 0;
 function logBoot(msg, detail = '') {
@@ -913,9 +952,7 @@ function preloadModels() {
 function showGate(e) {
   const denied = e && (e.name === 'NotAllowedError' || e.name === 'SecurityError');
   const nocam = e && (e.name === 'NotFoundError' || e.name === 'OverconstrainedError');
-  $('#gate-title').textContent = S.playful
-    ? (denied ? 'The camera is being shy' : nocam ? 'No camera in sight' : 'Hmm, that did not work')
-    : (denied ? 'Camera access blocked' : nocam ? 'No camera found' : 'Startup failed');
+  $('#gate-title').textContent = denied ? 'Camera access blocked' : nocam ? 'No camera found' : 'Startup failed';
   $('#gate-msg').textContent = denied
     ? 'Allow camera access for this site in your browser settings (on iPad: Settings \u203a Safari \u203a Camera), then try again.'
     : nocam
@@ -943,72 +980,16 @@ async function start(fromFile) {
     loop();
     updateWakeLock();
     updateDiag();
-    toast(quip('greet', 'Tracking online'), 'ok', 'hand');
-    startCoach();
+    toast('Tracking online', 'ok', 'hand');
   } catch (e) {
     console.error(e);
     showGate(e);
   }
 }
 
-// Fallback camera: some devices report the chosen facingMode but fail to open.
-const origStartCamera = startCamera;
-
 $('#gate-retry').addEventListener('click', () => start());
 $('#gate-file').addEventListener('click', () => $('#file-input').click());
 $('#file-input').addEventListener('change', (e) => { const f = e.target.files[0]; if (!f) return; if (running) useVideoFile(f).then(() => toast('Video source loaded', 'ok', 'video')); else start(f); });
-
-// ---------------- training coach ----------------
-// A three-step first-run tutorial that completes itself by watching the user
-// actually do the thing. Serious instrumentation, gentlest possible teaching.
-const COACH_STEPS = [
-  { label: 'Show a hand to the camera', hint: 'Any hand will do. Both is showing off.' },
-  { label: 'Make a shape — a fist, a point or a peace sign', hint: 'The gesture recogniser is watching. No pressure.' },
-  { label: 'Pinch thumb and index together', hint: 'That\u2019s the capture trigger. You\u2019re basically qualified now.' },
-];
-const COACH_KEY = 'kinesis.onboarded.v1';
-let coachStep = -1, coachHold = 0, coachDone = false;
-function coachEl() { return $('#coach'); }
-function startCoach() {
-  if (S.trackingMode !== 'hands') { coachDone = true; return; }
-  try { if (localStorage.getItem(COACH_KEY)) { coachDone = true; return; } } catch {}
-  coachStep = 0; renderCoach();
-  coachEl().hidden = false;
-}
-function renderCoach() {
-  const ol = $('#coach-steps');
-  ol.innerHTML = COACH_STEPS.map((s, i) =>
-    `<li class="${i < coachStep ? 'done' : i === coachStep ? 'active' : ''}"><span class="st">${i < coachStep ? '' : i + 1}</span><span>${s.label}</span></li>`).join('');
-  const s = COACH_STEPS[Math.min(coachStep, COACH_STEPS.length - 1)];
-  $('#coach-hint').textContent = s ? s.hint : '';
-}
-function coachAdvance() {
-  coachStep++;
-  if (coachStep >= COACH_STEPS.length) {
-    coachDone = true;
-    coachEl().hidden = true;
-    try { localStorage.setItem(COACH_KEY, '1'); } catch {}
-    awardBadge('graduate');
-    toast(S.playful ? 'Training complete. Certified Kinesis operator.' : 'Training complete', 'ok', 'graduation-cap');
-    return;
-  }
-  renderCoach();
-}
-function coachTick(now, scene) {
-  if (coachDone || coachStep < 0 || S.trackingMode !== 'hands') return;
-  const hands = scene.hands;
-  if (coachStep === 0) {
-    if (hands.length >= 1) { coachHold++; if (coachHold > 25) { coachHold = 0; coachAdvance(); } } else coachHold = 0;
-  } else if (coachStep === 1) {
-    if (hands.some((h) => h.gesture && h.gesture !== 'Unknown' && h.gesture !== 'Pinch')) { coachHold++; if (coachHold > 20) { coachHold = 0; coachAdvance(); } } else coachHold = 0;
-  } else if (coachStep === 2) {
-    if (hands.some((h) => h.analysis?.pinching)) { coachHold++; if (coachHold > 20) { coachHold = 0; coachAdvance(); } } else coachHold = 0;
-  }
-}
-$('#coach-skip').addEventListener('click', () => {
-  coachDone = true; coachEl().hidden = true;
-  try { localStorage.setItem(COACH_KEY, '1'); } catch {}
-});
 
 // ---------------- init ----------------
 if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
@@ -1024,4 +1005,4 @@ if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
 hydrateIcons();
 applyVisuals(); syncQuick(); layout();
 if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('./sw.js').catch(() => {});
-window.__kinesis = { S, L, tracker, get tracks() { return tracks; }, overlay, get hand3d() { return hand3d; }, session, badges: badgeSet };
+window.__kinesis = { S, L, tracker, get tracks() { return tracks; }, overlay, get hand3d() { return hand3d; }, session, motion };

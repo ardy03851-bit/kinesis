@@ -4,7 +4,7 @@
 // that tracking mode is active, so switching what Kinesis tracks changes
 // the entire settings surface.
 
-export const VERSION = '4.1.0';
+export const VERSION = '5.0.0';
 export const STORAGE_KEY = 'kinesis.settings.v3';
 
 const palette = [
@@ -303,6 +303,7 @@ export const SCHEMA = [
           { key: 'coords', type: 'toggle', label: 'Coordinate readout', showIf: 'crosshairs' },
           { key: 'bbox', type: 'toggle', label: 'Bounding frame' },
           { key: 'palmHud', type: 'toggle', label: 'Palm orientation ring' },
+          { key: 'pointRay', type: 'toggle', label: 'Designator ray', desc: 'Laser ray projected along the index finger, with range readout.' },
           { key: 'velocity', type: 'toggle', label: 'Velocity vectors' },
         ],
       },
@@ -310,6 +311,7 @@ export const SCHEMA = [
         id: 'interaction', label: 'Interaction',
         controls: [
           { key: 'pinchLine', type: 'toggle', label: 'Pinch gauge', desc: 'Live thumb–index distance with pinch flash.' },
+          { key: 'spanGauge', type: 'toggle', label: 'Span caliper', desc: 'Projected distance between the index fingertips of both hands, in millimetres.' },
           { key: 'hull', type: 'toggle', label: 'Hand silhouette fill' },
         ],
       },
@@ -325,6 +327,7 @@ export const SCHEMA = [
           { key: 'hand3dStyle', type: 'select', label: 'Model', showIf: 'hand3d',
             options: [
               { value: 'mannequin', label: 'Mannequin' },
+              { value: 'skin', label: 'Skin' },
               { value: 'chrome', label: 'Liquid chrome' },
               { value: 'hologram', label: 'Hologram' },
               { value: 'robot', label: 'Mech rig' },
@@ -350,6 +353,8 @@ export const SCHEMA = [
           { key: 'hand3dDepth', type: 'range', label: 'Depth exaggeration', min: 0, max: 3, step: 0.1, fmt: 'x', showIf: 'hand3d' },
           { key: 'hand3dGlow', type: 'toggle', label: 'Glow shell', showIf: 'hand3d' },
           { key: 'hand3dTint', type: 'color', label: 'Tint', swatches: palette, showIf: 'hand3d' },
+          { key: 'hand3dOrbit', type: 'toggle', label: 'Orbit view', showIf: 'hand3d',
+            desc: 'Drag the view to orbit the hand, scroll or pinch to zoom.' },
         ],
       },
       {
@@ -453,8 +458,6 @@ export const SCHEMA = [
         id: 'iface', label: 'Interface',
         controls: [
           { key: 'uiAccent', type: 'color', label: 'Interface accent', swatches: palette },
-          { key: 'playful', type: 'toggle', label: 'Playful commentary',
-            desc: 'Kinesis cheers you on while it works — coaching, badges and the occasional high five. Turn this off for a quieter, strictly professional instrument.' },
           { key: 'reduceMotion', type: 'toggle', label: 'Reduce UI motion' },
           { key: 'keepAwake', type: 'toggle', label: 'Keep screen awake' },
         ],
@@ -478,6 +481,15 @@ export const SCHEMA = [
             desc: 'Logs tracked landmarks to a CSV file at a fixed rate. Turn off to stop and download.' },
           { key: 'dataLogHz', type: 'select', label: 'Stream rate', showIf: 'dataLog',
             options: [ { value: '60', label: '60 Hz' }, { value: '30', label: '30 Hz' }, { value: '15', label: '15 Hz' }, { value: '5', label: '5 Hz' } ] },
+        ],
+      },
+      {
+        id: 'motion', label: 'Motion capture',
+        controls: [
+          { key: 'motionCapture', type: 'toggle', label: 'Motion capture timeline', modes: ['hands'],
+            desc: 'Continuously buffers the last few seconds of hand motion. A timeline bar appears at the bottom of the screen — scrub it to review any captured moment, press play to replay, and export the buffer as JSON.' },
+          { key: 'motionWindow', type: 'range', label: 'Buffer length', min: 2, max: 30, step: 1, fmt: 's0', modes: ['hands'], showIf: 'motionCapture' },
+          { key: 'motionExport', type: 'button', label: 'Export motion buffer (JSON)', icon: 'download', modes: ['hands'] },
         ],
       },
       {
@@ -530,22 +542,23 @@ export const DEFAULTS = {
 
   tracers: true, tracerStyle: 'ribbon', tracerLength: 28, tracerWidth: 4, tracerTips: 'index',
   crosshairs: true, crosshairStyle: 'tactical', crosshairTips: 'index', crosshairSize: 26, coords: true,
-  bbox: true, palmHud: false, velocity: false,
-  pinchLine: true, hull: false,
+  bbox: true, palmHud: false, pointRay: false, velocity: false,
+  pinchLine: true, spanGauge: false, hull: false,
 
   hand3d: false, hand3dStyle: 'mannequin', hand3dOpacity: 0.92, hand3dThickness: 1, hand3dDepth: 1,
-  hand3dGlow: false, hand3dTint: '#9fc9a6', lightOrbit: true, lightIntensity: 1.2, hand3dShadow: true,
+  hand3dGlow: false, hand3dTint: '#9fc9a6', hand3dOrbit: false, lightOrbit: true, lightIntensity: 1.2, hand3dShadow: true,
 
   armTracking: true, poseModel: 'lite', poseEvery: 1, armStyle: 'bone', armWidth: 8, elbowAngle: true, shoulders: false, arm3d: true, forearmEstimate: true,
 
   mirror: true, videoFit: 'cover', videoDim: 0.85, videoBlur: 0,
   grid: false, gridStyle: 'lines', scanlines: false, vignette: true, frameHud: true, scanSweep: false,
 
-  telemetry: true, fpsGraph: true, handLabels: true, gestures: true, gestureToast: true, swapHands: false, playful: true,
+  telemetry: true, fpsGraph: true, handLabels: true, gestures: true, gestureToast: true, swapHands: false,
   boresight: true, boresightStyle: 'mil', boresightSize: 70,
   headingTape: true, rangeFinder: true, targetLock: true, radar: true,
   radarSize: 64, radarRings: true, radarSweep: true, tacColor: '#9fc9a6',
   gestureCommands: false, uiAccent: '#9fc9a6', reduceMotion: false, keepAwake: true,
 
   dataLog: false, dataLogHz: '30', shotWatermark: true, recBitrate: '8',
+  motionCapture: false, motionWindow: 8,
 };
