@@ -111,7 +111,7 @@ export class SettingsUI {
       case 'select':
         return `<div class="ctl row" ${attrs}>
           <div class="lbl"><span>${esc(c.label)}${badge}</span>${desc}</div>
-          <div class="select">${'' }<select data-input="${c.key}" aria-label="${esc(c.label)}">${c.options.map((o) => `<option value="${o.value}" ${String(v) === String(o.value) ? 'selected' : ''}>${esc(o.label)}</option>`).join('')}</select>${icon('chevron-down')}</div>
+          <div class="select"><select data-input="${c.key}" aria-label="${esc(c.label)}">${c.options.map((o) => `<option value="${o.value}" ${String(v) === String(o.value) ? 'selected' : ''}>${esc(o.label)}</option>`).join('')}</select>${icon('chevron-down')}</div>
         </div>`;
       case 'segment':
         return `<div class="ctl seg-row" ${attrs}>

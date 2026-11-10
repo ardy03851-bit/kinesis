@@ -4,7 +4,7 @@
 // that tracking mode is active, so switching what Kinesis tracks changes
 // the entire settings surface.
 
-export const VERSION = '4.0.0';
+export const VERSION = '4.1.0';
 export const STORAGE_KEY = 'kinesis.settings.v3';
 
 const palette = [
@@ -389,6 +389,8 @@ export const SCHEMA = [
       {
         id: 'feed', label: 'Camera feed',
         controls: [
+          { key: 'loadFile', type: 'button', label: 'Load video footage', icon: 'upload',
+            desc: 'Analyse a video file from this device instead of the live camera.' },
           { key: 'mirror', type: 'toggle', label: 'Mirror view' },
           { key: 'videoFit', type: 'segment', label: 'Framing',
             options: [ { value: 'cover', label: 'Fill screen' }, { value: 'contain', label: 'Full frame' } ] },
@@ -451,6 +453,8 @@ export const SCHEMA = [
         id: 'iface', label: 'Interface',
         controls: [
           { key: 'uiAccent', type: 'color', label: 'Interface accent', swatches: palette },
+          { key: 'playful', type: 'toggle', label: 'Playful commentary',
+            desc: 'Kinesis cheers you on while it works — coaching, badges and the occasional high five. Turn this off for a quieter, strictly professional instrument.' },
           { key: 'reduceMotion', type: 'toggle', label: 'Reduce UI motion' },
           { key: 'keepAwake', type: 'toggle', label: 'Keep screen awake' },
         ],
@@ -537,7 +541,7 @@ export const DEFAULTS = {
   mirror: true, videoFit: 'cover', videoDim: 0.85, videoBlur: 0,
   grid: false, gridStyle: 'lines', scanlines: false, vignette: true, frameHud: true, scanSweep: false,
 
-  telemetry: true, fpsGraph: true, handLabels: true, gestures: true, gestureToast: true, swapHands: false,
+  telemetry: true, fpsGraph: true, handLabels: true, gestures: true, gestureToast: true, swapHands: false, playful: true,
   boresight: true, boresightStyle: 'mil', boresightSize: 70,
   headingTape: true, rangeFinder: true, targetLock: true, radar: true,
   radarSize: 64, radarRings: true, radarSweep: true, tacColor: '#9fc9a6',

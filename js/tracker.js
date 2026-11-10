@@ -28,6 +28,20 @@ const MODELS = {
 let visionModule = null;
 let fileset = null;
 
+// The GPU delegate hangs on devices without a working WebGL2 context (and can
+// wedge the WASM runtime so badly that even the CPU fallback never completes).
+// Probe for WebGL2 up front and route straight to CPU when it is missing.
+let gpuOK = null;
+function gpuSupported() {
+  if (gpuOK !== null) return gpuOK;
+  try {
+    const gl = document.createElement('canvas').getContext('webgl2');
+    gpuOK = !!gl;
+    gl?.getExtension('WEBGL_lose_context')?.loseContext();
+  } catch { gpuOK = false; }
+  return gpuOK;
+}
+
 async function loadVision(log) {
   if (!visionModule) {
     log?.('Loading vision runtime', 'tasks-vision ' + TV_VERSION);
@@ -43,7 +57,7 @@ async function loadVision(log) {
 export class Tracker {
   constructor() {
     this.hand = null; this.pose = null; this.objects = null; this.face = null;
-    this.cfg = null; this.kind = null;
+    this.cfg = null; this.kind = null; this.handKind = null;
     this.lastTs = -1; this.frame = 0; this.lastPose = null; this.activeDelegate = null;
   }
 
@@ -55,12 +69,15 @@ export class Tracker {
     this.close();
     this.cfg = { ...cfg };
     this.kind = cfg.trackingMode || 'hands';
+    this.handKind = cfg.handModel || 'landmarker';
     const makeOpts = (model, delegate) => ({
       baseOptions: { modelAssetPath: model, delegate },
       runningMode: 'VIDEO',
     });
-    const tryCreate = async (Cls, extra, model, label, delegateOverride = null, timeoutMs = 4000) => {
-      const useDelegate = delegateOverride || cfg.delegate;
+    const tryCreate = async (Cls, extra, model, label, delegateOverride = null, timeoutMs = 8000) => {
+      let useDelegate = delegateOverride || cfg.delegate;
+      // Route straight to CPU when there is no WebGL2 to delegate to.
+      if (useDelegate === 'GPU' && !gpuSupported()) useDelegate = 'CPU';
       const withTimeout = (p, ms) => Promise.race([
         p,
         new Promise((_, rej) => setTimeout(() => rej(new Error(`timed out after ${ms}ms`)), ms)),
@@ -163,7 +180,8 @@ export class Tracker {
 
     let hr = null;
     if (this.hand) {
-      hr = this.kind === 'gesture' ? this.hand.recognizeForVideo(video, ts) : this.hand.detectForVideo(video, ts);
+      // GestureRecognizer only exposes recognizeForVideo; HandLandmarker only detectForVideo.
+      hr = this.handKind === 'gesture' ? this.hand.recognizeForVideo(video, ts) : this.hand.detectForVideo(video, ts);
     }
     const handMs = performance.now() - t0;
 

@@ -4,6 +4,8 @@ A real-time optical tracking instrument that runs entirely in the browser. Point
 
 Live: https://ardy03851-bit.github.io/kinesis/
 
+Kinesis starts tracking the moment it opens — no start screen, no buttons to find. If it is your first visit, a short training coach walks you through showing a hand, making a gesture and pinching, and badges mark your milestones. All of the playful commentary can be switched off in Settings › HUD › Interface for a strictly professional instrument.
+
 ## Tracking modes
 
 What Kinesis tracks is switchable at any time (Tracking › What to track, or keys 1/2/9/4). Switching the target reloads the neural pipeline and presents a dedicated settings surface for that mode.
@@ -41,13 +43,18 @@ What Kinesis tracks is switchable at any time (Tracking › What to track, or ke
 - Face: gaze readout, blink tally, expression telemetry; objects: dashed trajectory prediction with lead ghost box
 
 ### Interface
+- Boots straight into live tracking — the camera starts automatically, with a narrated startup HUD and a recovery card if access is denied
+- First-run training coach: three steps that complete themselves by watching you show a hand, make a gesture and pinch
+- Achievement badges (first contact, gesture master, photographer, director, explorer, marathon, high five, certified operator)
+- Playful commentary mode (on by default) with a serious-mode switch in Settings › HUD › Interface
+- Session telemetry: live session timer and gesture counter in the telemetry panel
 - Searchable settings panel with export / import / share-link of settings
 - Soft-machine UI: capsule controls, rounded glass panels and rounded on-canvas HUD chips and panels — no hard squares
 - Installable PWA with a proper home-screen icon set (SVG + 192/512 PNG + maskable, full-bleed apple-touch-icon)
 - Fullscreen, wake lock, offline cache
 
 ## Using on iPad
-Open the site in Safari, tap Initialise and allow camera access. Use Share > Add to Home Screen for a full-screen app.
+Open the site in Safari and allow camera access — tracking starts immediately. Use Share > Add to Home Screen for a full-screen app.
 
 Keyboard: S settings, H hide UI, P capture, R record, L data log, F fullscreen, M mirror, Space pause, 3 toggle 3D, 1 hands, 2 body, 9 objects, 4 face, Esc close.
 

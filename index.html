@@ -76,6 +76,8 @@
     <div><dt>Inference</dt><dd><b id="t-hz">0</b><small>Hz</small></dd></div>
     <div><dt>Latency</dt><dd><b id="t-ms">0</b><small>ms</small></dd></div>
     <div><dt>Hands</dt><dd><b id="t-hands">0</b></dd></div>
+    <div><dt>Session</dt><dd><b id="t-session">0:00</b><small>min</small></dd></div>
+    <div><dt>Gestures</dt><dd><b id="t-gestures">0</b></dd></div>
   </dl>
   <canvas id="spark" aria-hidden="true"></canvas>
   <ul class="tl-rows">
@@ -103,42 +105,33 @@
   </div>
 </aside>
 
-<section class="intro" id="intro">
-  <div class="intro-bg" aria-hidden="true"></div>
-  <div class="intro-card">
-    <div class="intro-art"><svg class="hero-hand" viewBox="0 0 200 250" aria-hidden="true"><g class="hh-bones"><line x1="100" y1="222" x2="72" y2="204" style="--i:0"/><line x1="72" y1="204" x2="50" y2="180" style="--i:1"/><line x1="50" y1="180" x2="36" y2="155" style="--i:2"/><line x1="36" y1="155" x2="26" y2="132" style="--i:3"/><line x1="100" y1="222" x2="76" y2="138" style="--i:4"/><line x1="76" y1="138" x2="71" y2="102" style="--i:5"/><line x1="71" y1="102" x2="68" y2="79" style="--i:6"/><line x1="68" y1="79" x2="66" y2="58" style="--i:7"/><line x1="76" y1="138" x2="100" y2="132" style="--i:8"/><line x1="100" y1="132" x2="100" y2="93" style="--i:9"/><line x1="100" y1="93" x2="100" y2="68" style="--i:10"/><line x1="100" y1="68" x2="100" y2="45" style="--i:11"/><line x1="100" y1="132" x2="123" y2="137" style="--i:12"/><line x1="123" y1="137" x2="127" y2="101" style="--i:13"/><line x1="127" y1="101" x2="129" y2="79" style="--i:14"/><line x1="129" y1="79" x2="131" y2="60" style="--i:15"/><line x1="123" y1="137" x2="144" y2="147" style="--i:16"/><line x1="100" y1="222" x2="144" y2="147" style="--i:17"/><line x1="144" y1="147" x2="153" y2="120" style="--i:18"/><line x1="153" y1="120" x2="158" y2="102" style="--i:19"/><line x1="158" y1="102" x2="162" y2="85" style="--i:20"/></g><g class="hh-joints"><circle cx="100" cy="222" r="3" style="--i:0"/><circle cx="72" cy="204" r="3" style="--i:1"/><circle cx="50" cy="180" r="3" style="--i:2"/><circle cx="36" cy="155" r="3" style="--i:3"/><circle cx="26" cy="132" r="4.2" style="--i:4"/><circle cx="76" cy="138" r="3" style="--i:5"/><circle cx="71" cy="102" r="3" style="--i:6"/><circle cx="68" cy="79" r="3" style="--i:7"/><circle cx="66" cy="58" r="4.2" style="--i:8"/><circle cx="100" cy="132" r="3" style="--i:9"/><circle cx="100" cy="93" r="3" style="--i:10"/><circle cx="100" cy="68" r="3" style="--i:11"/><circle cx="100" cy="45" r="4.2" style="--i:12"/><circle cx="123" cy="137" r="3" style="--i:13"/><circle cx="127" cy="101" r="3" style="--i:14"/><circle cx="129" cy="79" r="3" style="--i:15"/><circle cx="131" cy="60" r="4.2" style="--i:16"/><circle cx="144" cy="147" r="3" style="--i:17"/><circle cx="153" cy="120" r="3" style="--i:18"/><circle cx="158" cy="102" r="3" style="--i:19"/><circle cx="162" cy="85" r="4.2" style="--i:20"/></g><g class="hh-tip"><circle cx="66" cy="58" r="14"/><path d="M66 36v10M66 70v10M44 58h10M78 58h10"/></g></svg>
-      <div class="art-ring" aria-hidden="true"></div>
-    </div>
-    <div class="intro-copy">
-      <p class="eyebrow mono"><span class="dot"></span>Optical tracking system / v3</p>
-      <h1>Kinesis</h1>
-      <p class="lede">A real-time optical tracking instrument. Hands, full bodies, faces and objects in the frame — 21-point hand mesh, 33-point body skeleton, 478-point face mesh, COCO-80 detection, 3D rigs and tactical instrumentation. All inference runs on this device.</p>
-      <div class="facing segment-lite" role="group" aria-label="Camera">
-        <button data-facing="user" class="on"><span data-icon="smartphone"></span>Front camera</button>
-        <button data-facing="environment"><span data-icon="camera"></span>Rear camera</button>
-      </div>
-      <div class="intro-actions">
-        <button class="btn primary" id="btn-start"><span data-icon="scan-line"></span><span>Initialise</span></button>
-        <button class="btn ghost" id="btn-file"><span data-icon="upload"></span><span>Load footage</span></button>
-      </div>
-      <div class="intro-error" id="intro-error" role="alert"></div>
-      <div class="boot">
-        <div class="boot-bar" id="boot-bar"><i></i></div>
-        <ol class="boot-log mono" id="boot-log"></ol>
-      </div>
-      <ul class="specs mono">
-        <li><span data-icon="fingerprint"></span>21-point hand mesh</li>
-        <li><span data-icon="person-standing"></span>33-point body skeleton</li>
-        <li><span data-icon="scan-face"></span>478-point face mesh</li>
-        <li><span data-icon="scan-search"></span>COCO-80 object detection</li>
-        <li><span data-icon="box"></span>19 3D models</li>
-        <li><span data-icon="shield"></span>Video stays on device</li>
-      </ul>
+<div class="boot-hud" id="boot-hud" role="status" aria-live="polite">
+  <i class="boot-dot"></i><span id="boot-msg">Waking up&hellip;</span>
+  <span class="boot-track"><span id="boot-fill"></span></span>
+</div>
+
+<section class="gate" id="gate" hidden aria-label="Camera problem">
+  <div class="gate-card">
+    <div class="gate-ico" data-icon="camera-off"></div>
+    <h2 id="gate-title">The camera is being shy</h2>
+    <p id="gate-msg">Allow camera access for this site in your browser settings (on iPad: Settings &rsaquo; Safari &rsaquo; Camera), then try again.</p>
+    <div class="gate-actions">
+      <button class="btn primary" id="gate-retry"><span data-icon="refresh-cw"></span><span>Try again</span></button>
+      <button class="btn ghost" id="gate-file"><span data-icon="upload"></span><span>Load footage</span></button>
     </div>
   </div>
-  <input type="file" id="file-input" accept="video/*" hidden>
 </section>
-<button hidden id="btn-source"></button>
+
+<aside class="coach chrome" id="coach" hidden aria-label="Getting started">
+  <div class="coach-head">
+    <span class="coach-tag mono"><span data-icon="graduation-cap"></span>Training mode</span>
+    <button class="ibtn" id="coach-skip" aria-label="Skip training" data-icon="x"></button>
+  </div>
+  <ol class="coach-steps" id="coach-steps"></ol>
+  <p class="coach-hint" id="coach-hint"></p>
+</aside>
+
+<input type="file" id="file-input" accept="video/*" hidden>
 
 <script type="module" src="js/main.js"></script>
 </body>

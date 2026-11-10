@@ -38,8 +38,44 @@ function toast(msg, kind = 'info', ic = 'info') {
   el.className = `toast ${kind}`;
   el.innerHTML = `${icon(ic)}<span>${msg}</span>`;
   $('#toasts').appendChild(el);
-  setTimeout(() => { el.classList.add('out'); setTimeout(() => el.remove(), 400); }, 2600);
+  const life = kind === 'award' ? 4200 : 2600;
+  setTimeout(() => { el.classList.add('out'); setTimeout(() => el.remove(), 400); }, life);
 }
+
+// ---------------- personality ----------------
+// Kinesis keeps its instrumentation dead serious, but talks like an
+// over-enthusiastic lab assistant. `S.playful` switches the voice.
+const QUIPS = {
+  searching: ['Scanning for hands…', 'Where did your hands go?', 'Wave at the camera. Go on.', 'Still looking… don\u2019t be shy.'],
+  tracking: ['Locked on. Very impressive.', 'Nailed it.', 'Hands: found. Science: happening.', 'Gotcha.'],
+  greet: ['Tracking online — wiggle those fingers', 'All systems awake. Show me a hand.'],
+};
+function pick(list) { return list[Math.floor(Math.random() * list.length)]; }
+function quip(kind, fallback) { return S.playful ? pick(QUIPS[kind]) : fallback; }
+
+// ---------------- badges ----------------
+const BADGES = {
+  'first-hand': { label: 'First contact', desc: 'A hand appeared. Historic.', ic: 'hand' },
+  'first-gesture': { label: 'Gesture master', desc: 'First gesture recognised.', ic: 'sparkles' },
+  'first-capture': { label: 'Photographer', desc: 'First still captured.', ic: 'aperture' },
+  'first-recording': { label: 'Director', desc: 'First recording saved.', ic: 'video' },
+  'explorer': { label: 'Explorer', desc: 'Tried all four tracking modes.', ic: 'scan-search' },
+  'graduate': { label: 'Certified operator', desc: 'Completed training mode.', ic: 'graduation-cap' },
+  'marathon': { label: 'Marathon', desc: 'Five minutes of continuous tracking.', ic: 'timer' },
+  'high-five': { label: 'High five', desc: 'Two hands, one celebration.', ic: 'party-popper' },
+};
+let badgeSet = new Set();
+try { badgeSet = new Set(JSON.parse(localStorage.getItem('kinesis.badges') || '[]')); } catch {}
+function awardBadge(key) {
+  if (badgeSet.has(key) || !S.playful) return;
+  const b = BADGES[key]; if (!b) return;
+  badgeSet.add(key);
+  try { localStorage.setItem('kinesis.badges', JSON.stringify([...badgeSet])); } catch {}
+  toast(`<b>Badge earned — ${b.label}</b><span> · ${b.desc}</span>`, 'award', b.ic);
+}
+
+// ---------------- session stats ----------------
+const session = { startedAt: 0, gestures: 0, highFived: 0, modesTried: new Set(), lastHighFive: 0 };
 
 // ---------------- layout / mapping ----------------
 const L = { w: 1, h: 1, vw: 1280, vh: 720, s: 1, ox: 0, oy: 0, dpr: 1 };
@@ -150,6 +186,7 @@ function ingest(res, now) {
     if (used.has(di)) return;
     const t = { id: nextId++, filter: new HandFilter(), stab: new GestureStabiliser(7), missing: 0, pinching: false, lastToast: 0, gesture: 'Unknown' };
     tracks.push(t); update(t, d, now);
+    if (t.norm) awardBadge('first-hand');
   });
   tracks.forEach((t, ti) => { if (!tUsed.has(ti) && !t.fresh) t.missing++; t.fresh = false; });
   tracks = tracks.filter((t) => t.missing <= S.holdFrames);
@@ -250,16 +287,20 @@ function update(t, d, now) {
   else if (a.pinching && a.gesture !== 'OK') label = 'Pinch';
   const prev = t.gesture;
   t.gesture = t.stab.push(label);
+  if (t.gesture !== prev && t.gesture !== 'Unknown') { session.gestures++; awardBadge('first-gesture'); }
   if (S.gestures && S.gestureToast && t.gesture !== prev && t.gesture !== 'Unknown' && now - t.lastToast > 1100) {
     t.lastToast = now; gestureFlash(t);
   }
 }
 
 const GESTURE_ICON = { 'Open palm': 'hand', Fist: 'circle-dot', Point: 'pointer', Peace: 'git-branch', 'Thumbs up': 'check', 'Thumbs down': 'triangle-alert', Rock: 'hand-metal', Love: 'sparkles', OK: 'circle-gauge', Pinch: 'mouse-pointer-click', 'Call me': 'smartphone', Three: 'layers', Four: 'grid-3x3', 'L-shape': 'scan', Thumb: 'hand' };
+const GESTURE_QUIP = { 'Open palm': 'Hello there.', Fist: 'Solid grip.', Peace: 'Peace, indeed.', 'Thumbs up': 'Two thumbs way up.', Rock: 'Very rock and roll.', Love: 'Feeling the love.', OK: 'A-OK.', Pinch: 'A delicate pinch.', 'Thumbs down': 'Harsh, but noted.', 'Call me': 'Ring ring.', Point: 'Right over there.' };
 let gestureTimer = 0;
 function gestureFlash(t) {
   const el = $('#gesture');
-  el.innerHTML = `${icon(GESTURE_ICON[t.gesture] || 'hand')}<b>${t.gesture}</b><span>${t.handedness === 'Unknown' ? '' : (S.swapHands ? (t.handedness === 'Left' ? 'Right' : 'Left') : t.handedness) + ' hand'}</span>`;
+  const hand = t.handedness === 'Unknown' ? '' : (S.swapHands ? (t.handedness === 'Left' ? 'Right' : 'Left') : t.handedness) + ' hand';
+  const quipTxt = S.playful && GESTURE_QUIP[t.gesture] ? GESTURE_QUIP[t.gesture] : hand;
+  el.innerHTML = `${icon(GESTURE_ICON[t.gesture] || 'hand')}<b>${t.gesture}</b><span>${quipTxt}</span>`;
   el.classList.remove('show'); void el.offsetWidth; el.classList.add('show');
   clearTimeout(gestureTimer); gestureTimer = setTimeout(() => el.classList.remove('show'), 1400);
 }
@@ -380,8 +421,11 @@ function loop() {
 
   const scene = buildModeScene(buildScene(now, dt));
   overlay.render(S, scene);
-  if (S.hand3d && hand3d) hand3d.render(S, scene);
-  else if (hand3d) hand3d.render(S, scene);
+  if (hand3d) hand3d.render(S, scene);
+
+  checkHighFive(now, scene);
+  coachTick(now, scene);
+  if (session.startedAt && now - session.startedAt > 5 * 60 * 1000) awardBadge('marathon');
 
   if (captureReq) { const r = captureReq; captureReq = null; r(composite()); }
   if (recorder && recorder.state === 'recording') composite(recCanvas, recCtx);
@@ -448,10 +492,19 @@ function updateTelemetry(now, scene) {
   };
   (modeRows[S.trackingMode] || modeRows.hands)();
   $('#chip-fps').textContent = `${stats.renderFps.toFixed(0)} FPS`;
+  if (session.startedAt) {
+    const s = Math.max(0, Math.floor((now - session.startedAt) / 1000));
+    $('#t-session').textContent = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+  }
+  $('#t-gestures').textContent = session.gestures;
   const n = S.trackingMode === 'objects' ? scene.objects.length : S.trackingMode === 'face' ? faceTracks.length : scene.hands.length;
   const label = { hands: 'hand', body: 'body', objects: 'contact', face: 'face' }[S.trackingMode] || 'contact';
   const searching = S.trackingMode === 'body' ? !scene.body : n === 0;
-  setStatus(paused ? 'paused' : searching ? 'search' : 'tracking', paused ? 'Paused' : searching ? 'Searching' : `Tracking ${n} ${label}${n > 1 ? 's' : ''}`);
+  const searchMsg = S.playful
+    ? (S.trackingMode === 'hands' ? stickyQuip('searching', now) : `Searching for ${label}s…`)
+    : `Searching`;
+  const trackMsg = S.playful && n === 1 && S.trackingMode === 'hands' ? `Tracking 1 hand — ${stickyQuip('tracking', now)}` : `Tracking ${n} ${label}${n > 1 ? 's' : ''}`;
+  setStatus(paused ? 'paused' : searching ? 'search' : 'tracking', paused ? 'Paused' : searching ? searchMsg : trackMsg);
   drawSpark();
 }
 
@@ -475,6 +528,11 @@ function drawSpark() {
 }
 
 let statusKind = '';
+let quipHold = { text: '', until: 0 };
+function stickyQuip(kind, now) {
+  if (now > quipHold.until || quipHold.kind !== kind) { quipHold = { kind, text: pick(QUIPS[kind]), until: now + 5000 }; }
+  return quipHold.text;
+}
 function setStatus(kind, text) {
   const chip = $('#status');
   if (statusKind !== kind) { chip.dataset.state = kind; statusKind = kind; }
@@ -514,7 +572,7 @@ async function saveBlob(blob, name) {
 function capture() {
   if (!running) return;
   $('#flash').classList.remove('go'); void $('#flash').offsetWidth; $('#flash').classList.add('go');
-  captureReq = (cv) => cv.toBlob((b) => { if (b) { saveBlob(b, `kinesis-${Date.now()}.png`); toast('Still captured', 'ok', 'aperture'); } }, 'image/png');
+  captureReq = (cv) => cv.toBlob((b) => { if (b) { saveBlob(b, `kinesis-${Date.now()}.png`); toast(S.playful ? 'Snap! Still captured.' : 'Still captured', 'ok', 'aperture'); awardBadge('first-capture'); } }, 'image/png');
 }
 function toggleRecord() {
   if (!running) return;
@@ -533,7 +591,8 @@ function toggleRecord() {
     btn.classList.remove('recording'); $('#rec-pill').classList.remove('show');
     const blob = new Blob(chunks, { type: recorder.mimeType || 'video/webm' });
     saveBlob(blob, `kinesis-${Date.now()}.${(recorder.mimeType || '').includes('mp4') ? 'mp4' : 'webm'}`);
-    toast('Recording saved', 'ok', 'video'); recorder = null;
+    toast(S.playful ? 'Recording saved — future you will thank present you.' : 'Recording saved', 'ok', 'video'); recorder = null;
+    awardBadge('first-recording');
   };
   recorder.start(250);
   btn.classList.add('recording'); $('#rec-pill').classList.add('show');
@@ -547,11 +606,6 @@ let dataLog = null; // { rows: [], lastT: 0, header: string[], mode }
 function startDataLog() {
   if (dataLog) return;
   const mode = S.trackingMode;
-  let header;
-  if (mode === 'body') header = ['t_ms', 'landmark', 'x', 'y', 'z', 'visibility'];
-  else if (mode === 'objects') header = ['t_ms', 'track_id', 'class', 'score', 'x0', 'y0', 'x1', 'y1'];
-  else if (mode === 'face') header = ['t_ms', 'face', 'yaw_deg', 'pitch_deg', 'roll_deg', 'blink_l', 'blink_r'];
-  else header = ['t_ms', 'track_id', 'handedness', 'gesture', 'pinch_mm', 'landmark', 'x', 'y', 'z'];
   dataLog = { rows: [], lastT: 0, mode };
   toast(`Recording ${mode} stream at ${S.dataLogHz} Hz`, 'ok', 'download');
 }
@@ -624,6 +678,21 @@ function exportFrame() {
   toast('Frame exported', 'ok', 'download');
 }
 
+// ---------------- high five ----------------
+// Two open palms brought close together earn a celebration. Purely scientific.
+function checkHighFive(now, scene) {
+  if (!S.playful || S.trackingMode !== 'hands' || paused) return;
+  if (scene.hands.length < 2 || now - session.lastHighFive < 4000) return;
+  const [a, b] = scene.hands;
+  if (a.gesture !== 'Open palm' || b.gesture !== 'Open palm') return;
+  const d = Math.hypot(a.pts[0].x - b.pts[0].x, a.pts[0].y - b.pts[0].y);
+  if (d < Math.max(a.palmPx, b.palmPx) * 1.6) {
+    session.lastHighFive = now; session.highFived++;
+    toast('High five! Great teamwork.', 'ok', 'party-popper');
+    awardBadge('high-five');
+  }
+}
+
 // ---------------- gesture commands ----------------
 const cmdState = { pinchSince: 0, thumbsSince: 0, pinchDone: false, thumbsDone: false };
 function runGestureCommands(now) {
@@ -690,7 +759,6 @@ function scheduleReinit(kind) {
     if (reinitBusy) { scheduleReinit(kind); return; }
     reinitBusy = true;
     setStatus('loading', 'Reloading model');
-    const keep = tracker.hand;
     try {
       await tracker.init(S, (m) => setStatus('loading', m));
       tracks = []; poseSmoothed = null;
@@ -707,7 +775,10 @@ function setTrackingMode(v) {
   S.trackingMode = v;
   tracks = []; objTracks = []; faceTracks = []; poseSmoothed = null;
   applyVisuals(); ui.refresh();
-  toast(`Tracking mode: ${v}`, 'ok', 'cpu');
+  session.modesTried.add(v);
+  if (session.modesTried.size >= 4) awardBadge('explorer');
+  const MODE_MSG = { hands: 'Hands it is. Show me what you\u2019ve got.', body: 'Full-body mode — stand back a little.', objects: 'Object hunt: everything in frame is a suspect.', face: 'Face mode. Try not to blink… actually, do. It counts them.' };
+  toast(S.playful ? (MODE_MSG[v] || `Tracking mode: ${v}`) : `Tracking mode: ${v}`, 'ok', 'cpu');
 }
 
 const ui = new SettingsUI({
@@ -727,6 +798,7 @@ const ui = new SettingsUI({
   },
   onAction(a, arg) {
     if (a === 'exportFrame') { exportFrame(); }
+    else if (a === 'loadFile') { $('#file-input').click(); }
     else if (a === 'reset') {
       const needReinit = ['handModel', 'delegate', 'numHands', 'armTracking', 'poseModel', 'detectConf', 'presenceConf', 'trackConf', 'trackingMode', 'objModel', 'objScore', 'objMax', 'faceMax', 'faceDetectConf', 'bodyPoseConf', 'bodyTrackConf'].some((k) => S[k] !== DEFAULTS[k]);
       if (S.dataLog) stopDataLog(true);
@@ -816,15 +888,20 @@ window.addEventListener('keydown', (e) => {
 });
 
 // ---------------- boot ----------------
-const bootLog = $('#boot-log');
+// No landing menu: Kinesis boots straight into live tracking. The boot HUD
+// narrates startup in the top bar, a gate card appears if the camera refuses,
+// and first-time visitors get a playful training coach.
+const bootHud = $('#boot-hud'), bootMsg = $('#boot-msg'), bootFill = $('#boot-fill');
 let bootStep = 0;
 function logBoot(msg, detail = '') {
   bootStep++;
-  bootLog.querySelectorAll('li.run').forEach((li) => { li.classList.remove('run'); li.classList.add('done'); });
-  const li = document.createElement('li'); li.className = 'run';
-  li.innerHTML = `<i></i><span>${msg}</span><em>${detail}</em>`;
-  bootLog.appendChild(li);
-  $('#boot-bar').style.setProperty('--p', Math.min(96, bootStep * 16) + '%');
+  bootHud.classList.add('show');
+  bootMsg.textContent = detail ? `${msg} — ${detail}` : msg;
+  bootFill.style.width = Math.min(96, bootStep * 14) + '%';
+}
+function bootDone() {
+  bootFill.style.width = '100%';
+  setTimeout(() => bootHud.classList.remove('show'), 600);
 }
 
 let preload = null;
@@ -833,56 +910,118 @@ function preloadModels() {
   return preload;
 }
 
+function showGate(e) {
+  const denied = e && (e.name === 'NotAllowedError' || e.name === 'SecurityError');
+  const nocam = e && (e.name === 'NotFoundError' || e.name === 'OverconstrainedError');
+  $('#gate-title').textContent = S.playful
+    ? (denied ? 'The camera is being shy' : nocam ? 'No camera in sight' : 'Hmm, that did not work')
+    : (denied ? 'Camera access blocked' : nocam ? 'No camera found' : 'Startup failed');
+  $('#gate-msg').textContent = denied
+    ? 'Allow camera access for this site in your browser settings (on iPad: Settings \u203a Safari \u203a Camera), then try again.'
+    : nocam
+      ? 'Connect a camera, or load a video file to analyse footage instead.'
+      : (e?.message || String(e));
+  $('#gate').hidden = false;
+  bootHud.classList.remove('show');
+}
+
 async function start(fromFile) {
-  const startBtn = $('#btn-start');
-  $('#intro').classList.add('booting');
-  startBtn.disabled = true;
+  $('#gate').hidden = true;
+  bootStep = 0;
   try {
-    logBoot(fromFile ? 'Opening video file' : 'Requesting camera', fromFile ? fromFile.name : (facing === 'user' ? 'front' : 'rear'));
+    logBoot(fromFile ? 'Opening video file' : 'Starting camera', fromFile ? fromFile.name : (facing === 'user' ? 'front' : 'rear'));
     const camP = fromFile ? useVideoFile(fromFile) : startCamera();
     await camP;
-    logBoot('Video stream online', `${video.videoWidth}×${video.videoHeight}`);
+    logBoot('Video stream online', `${video.videoWidth}\u00d7${video.videoHeight}`);
     await preloadModels();
     if (S.hand3d) { logBoot('Compiling 3D renderer', 'three.js'); await ensure3D(); }
     logBoot('Calibrating overlay', tracker.activeDelegate + ' inference');
-    $('#boot-bar').style.setProperty('--p', '100%');
-    bootLog.querySelectorAll('li.run').forEach((li) => { li.classList.remove('run'); li.classList.add('done'); });
-    await new Promise((r) => setTimeout(r, 380));
+    bootDone();
     document.body.classList.add('live');
     applyVisuals(); layout();
-    running = true; lastFrame = startedAt = performance.now(); loop();
+    running = true; lastFrame = startedAt = performance.now(); session.startedAt = performance.now();
+    loop();
     updateWakeLock();
-    toast('Tracking online — raise your hand', 'ok', 'hand');
+    updateDiag();
+    toast(quip('greet', 'Tracking online'), 'ok', 'hand');
+    startCoach();
   } catch (e) {
     console.error(e);
-    const denied = e && (e.name === 'NotAllowedError' || e.name === 'SecurityError');
-    const nocam = e && (e.name === 'NotFoundError' || e.name === 'OverconstrainedError');
-    $('#intro').classList.remove('booting');
-    $('#intro-error').innerHTML = `${icon('camera-off')}<div><b>${denied ? 'Camera access was blocked' : nocam ? 'No camera found' : 'Something went wrong'}</b><span>${denied ? 'Allow camera access for this site in your browser settings (on iPad: Settings › Safari › Camera), then try again.' : nocam ? 'Connect a camera or open a video file instead.' : (e.message || String(e))}</span></div>`;
-    $('#intro-error').classList.add('show');
-    bootLog.innerHTML = ''; bootStep = 0;
-    startBtn.disabled = false;
+    showGate(e);
   }
 }
 
-$('#btn-start').addEventListener('click', () => start());
-$('#file-input').addEventListener('change', (e) => { const f = e.target.files[0]; if (!f) return; if (running) useVideoFile(f).then(() => toast('Video source loaded', 'ok', 'video')); else start(f); });
-$('#btn-file').addEventListener('click', () => $('#file-input').click());
-$('#btn-source').addEventListener('click', () => $('#file-input').click());
-$$('[data-facing]').forEach((b) => b.addEventListener('click', () => {
-  facing = b.dataset.facing; S.mirror = facing === 'user'; persist();
-  $$('[data-facing]').forEach((x) => x.classList.toggle('on', x === b));
-}));
+// Fallback camera: some devices report the chosen facingMode but fail to open.
+const origStartCamera = startCamera;
 
+$('#gate-retry').addEventListener('click', () => start());
+$('#gate-file').addEventListener('click', () => $('#file-input').click());
+$('#file-input').addEventListener('change', (e) => { const f = e.target.files[0]; if (!f) return; if (running) useVideoFile(f).then(() => toast('Video source loaded', 'ok', 'video')); else start(f); });
+
+// ---------------- training coach ----------------
+// A three-step first-run tutorial that completes itself by watching the user
+// actually do the thing. Serious instrumentation, gentlest possible teaching.
+const COACH_STEPS = [
+  { label: 'Show a hand to the camera', hint: 'Any hand will do. Both is showing off.' },
+  { label: 'Make a shape — a fist, a point or a peace sign', hint: 'The gesture recogniser is watching. No pressure.' },
+  { label: 'Pinch thumb and index together', hint: 'That\u2019s the capture trigger. You\u2019re basically qualified now.' },
+];
+const COACH_KEY = 'kinesis.onboarded.v1';
+let coachStep = -1, coachHold = 0, coachDone = false;
+function coachEl() { return $('#coach'); }
+function startCoach() {
+  if (S.trackingMode !== 'hands') { coachDone = true; return; }
+  try { if (localStorage.getItem(COACH_KEY)) { coachDone = true; return; } } catch {}
+  coachStep = 0; renderCoach();
+  coachEl().hidden = false;
+}
+function renderCoach() {
+  const ol = $('#coach-steps');
+  ol.innerHTML = COACH_STEPS.map((s, i) =>
+    `<li class="${i < coachStep ? 'done' : i === coachStep ? 'active' : ''}"><span class="st">${i < coachStep ? '' : i + 1}</span><span>${s.label}</span></li>`).join('');
+  const s = COACH_STEPS[Math.min(coachStep, COACH_STEPS.length - 1)];
+  $('#coach-hint').textContent = s ? s.hint : '';
+}
+function coachAdvance() {
+  coachStep++;
+  if (coachStep >= COACH_STEPS.length) {
+    coachDone = true;
+    coachEl().hidden = true;
+    try { localStorage.setItem(COACH_KEY, '1'); } catch {}
+    awardBadge('graduate');
+    toast(S.playful ? 'Training complete. Certified Kinesis operator.' : 'Training complete', 'ok', 'graduation-cap');
+    return;
+  }
+  renderCoach();
+}
+function coachTick(now, scene) {
+  if (coachDone || coachStep < 0 || S.trackingMode !== 'hands') return;
+  const hands = scene.hands;
+  if (coachStep === 0) {
+    if (hands.length >= 1) { coachHold++; if (coachHold > 25) { coachHold = 0; coachAdvance(); } } else coachHold = 0;
+  } else if (coachStep === 1) {
+    if (hands.some((h) => h.gesture && h.gesture !== 'Unknown' && h.gesture !== 'Pinch')) { coachHold++; if (coachHold > 20) { coachHold = 0; coachAdvance(); } } else coachHold = 0;
+  } else if (coachStep === 2) {
+    if (hands.some((h) => h.analysis?.pinching)) { coachHold++; if (coachHold > 20) { coachHold = 0; coachAdvance(); } } else coachHold = 0;
+  }
+}
+$('#coach-skip').addEventListener('click', () => {
+  coachDone = true; coachEl().hidden = true;
+  try { localStorage.setItem(COACH_KEY, '1'); } catch {}
+});
+
+// ---------------- init ----------------
 if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
-  $('#intro-error').innerHTML = `${icon('triangle-alert')}<div><b>Camera unavailable</b><span>Open this page over HTTPS in Safari or Chrome to use the camera. You can still open a video file.</span></div>`;
-  $('#intro-error').classList.add('show');
+  // No camera API at all — go straight to the gate with the file option.
+  showGate(Object.assign(new Error('Open this page over HTTPS in Safari or Chrome to use the camera.'), { name: 'SecurityError' }));
+  bootHud.classList.remove('show');
+} else {
+  // Boot straight into tracking: warm the models, then open the camera.
+  logBoot('Warming up neural models');
+  setTimeout(() => start().catch(() => {}), 60);
 }
 
 hydrateIcons();
 applyVisuals(); syncQuick(); layout();
-// Warm the models while the user reads the intro.
-setTimeout(() => preloadModels().catch((e) => console.warn('preload failed', e)), 300);
-if (S.hand3d) setTimeout(ensure3D, 600);
 if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('./sw.js').catch(() => {});
-window.__kinesis = { S, L, tracker, get tracks() { return tracks; }, overlay, get hand3d() { return hand3d; } };
+window.__kinesis = { S, L, tracker, get tracks() { return tracks; }, overlay, get hand3d() { return hand3d; }, session, badges: badgeSet };
